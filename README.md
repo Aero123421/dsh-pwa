@@ -20,14 +20,16 @@ Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/
 Install directly from GitHub into the **web** profile:
 
 ```bash
-dsh plugin --profile web add github:Aero123421/dsh-pwa
+dsh plugin --profile web add -w github:Aero123421/dsh-pwa
 ```
+
+`-w` targets the Web profile's workspace root.
 
 Or from a local checkout:
 
 ```bash
 git clone https://github.com/Aero123421/dsh-pwa.git
-dsh plugin --profile web add ./dsh-pwa
+dsh plugin --profile web add -w ./dsh-pwa
 ```
 
 The project ships plain JavaScript and PNG files; **no prepare script or build approval is required**. Prefer pinning a reviewed Git commit with `github:Aero123421/dsh-pwa#<commit-sha>`.
@@ -70,7 +72,7 @@ Only static, publicly readable brand metadata is served. There are **no new API 
 To uninstall:
 
 ```bash
-dsh plugin --profile web remove dsh-pwa
+dsh plugin --profile web remove -w dsh-pwa
 ```
 
 ## Test
