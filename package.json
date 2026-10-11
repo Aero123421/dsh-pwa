@@ -9,6 +9,7 @@
     "cordis.patch.yml",
     "assets/*.png",
     "LICENSE",
+    "LICENSE.DeepSeek",
     "NOTICE.md"
   ],
   "dsh": {
