@@ -19,7 +19,7 @@ const manifest = JSON.stringify({
   start_url: './',
   scope: './',
   display: 'standalone',
-  background_color: '#4D6BFE',
+  background_color: '#FFFFFF',
   theme_color: '#151517',
   icons: [
     { src: './pwa/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
