@@ -75,3 +75,12 @@ test('Client contribution stays optional without settings, locale or connection'
   assert.equal(apply({}), undefined)
   assert.equal(apply({ slots: { inject() { throw new Error('unexpected contribution') } } }), undefined)
 })
+
+test('profile change clears old in-memory request before later connection failure', async () => {
+  const { UpdateController } = await clientExports()
+  let fail = false
+  const controller = new UpdateController({ rpc: { call: async () => { if (fail) throw new Error('network'); return { ok: true, value: { profileKey: 'B', status: 'idle' } } } } }, storage())
+  controller.profileKey = 'A'; controller.requestId = 'old-A'; controller.publish({ status: 'unknown' })
+  await controller.load(); assert.equal(controller.requestId, undefined)
+  fail = true; await controller.load(); assert.equal(controller.state.status, 'blocked'); controller.dispose()
+})

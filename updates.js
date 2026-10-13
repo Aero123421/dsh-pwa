@@ -115,8 +115,8 @@ function safeResult(result) {
 
 export function resultState(result, expected, runtime, installed) {
   if (!result) return 'unknown'
-  if (result.error || result.application === 'failed' || (result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) return 'failed'
   if (['cancelled', 'overridden'].includes(result.application)) return result.application
+  if (result.error || result.application === 'failed' || (result.packageResult && (result.packageResult.exitCode !== 0 || result.packageResult.timedOut))) return 'failed'
   if (result.bundle !== PACKAGE || result.version !== expected || !installed?.installed || installed.version !== expected || installed.error || installed.readOnlyReason) return 'unknown'
   if (result.application === 'restart-required') return 'restart-required'
   return result.application === 'applied' && runtime === expected ? 'applied' : 'unknown'

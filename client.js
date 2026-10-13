@@ -52,6 +52,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       try {
         let state = await this.call('status')
         if (this.closed || generation !== this.generation) return
+        if (this.profileKey !== state.profileKey) this.requestId = undefined
         this.profileKey = state.profileKey
         let pending
         try { pending = this.key() && this.storage?.getItem(this.key()) } catch {}

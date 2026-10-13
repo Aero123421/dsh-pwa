@@ -212,3 +212,7 @@ test('delayed request from another profile is refused before admission', async t
   await assert.rejects(second.updater.begin('7', randomUUID()), /invalid-request/)
   assert.equal(second.calls.length, 0); assert.equal(await second.updater.lastOperation(), undefined)
 })
+
+test('manager cancellation and override retain their terminal outcome despite package exit', () => {
+  for (const application of ['cancelled', 'overridden']) assert.equal(resultState({ application, packageResult: { exitCode: 130, timedOut: true } }, '0.3.0', '0.2.0'), application)
+})
