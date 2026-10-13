@@ -16,7 +16,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.busy': 'Another update is in progress.', 'reason.redirect': 'A download redirected outside the approved repository.', 'reason.size': 'Release data exceeded the download limit.', 'reason.stale-candidate': 'The candidate or installed bundle changed. Check again.',
       'mobile.title': 'Mobile layout', 'mobile.auto': 'Auto', 'mobile.on': 'On', 'mobile.off': 'Off',
       'mobile.hint': 'Auto uses the mobile layout on screens narrower than 768px. The choice is saved in this browser only.', 'mobile.active': 'Mobile layout is on in this browser.', 'mobile.inactive': 'Mobile layout is off in this browser.',
-      'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.newSession': 'New session',
+      'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.closePanel': 'Close panel',
       'reason.release-unavailable': 'No published update release is available.', 'reason.storage': 'The profile update record could not be saved.', 'reason.interrupted': 'Preparation was interrupted before installation. Check again.', 'reason.network': 'The release service or DSH connection could not be reached.',
     },
     ja: {
@@ -31,7 +31,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.busy': '別の更新が進行中です。', 'reason.redirect': '許可していない取得先への転送を拒否しました。', 'reason.size': '配布情報が取得サイズ上限を超えました。', 'reason.stale-candidate': '候補または導入済み bundle が変わりました。再確認してください。',
       'mobile.title': 'モバイル表示', 'mobile.auto': '自動', 'mobile.on': 'オン', 'mobile.off': 'オフ',
       'mobile.hint': '自動では幅 768px 未満の画面でモバイル表示にします。設定はこのブラウザにだけ保存されます。', 'mobile.active': 'このブラウザではモバイル表示がオンです。', 'mobile.inactive': 'このブラウザではモバイル表示がオフです。',
-      'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.newSession': '新しいセッション',
+      'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.closePanel': 'パネルを閉じる',
       'reason.release-unavailable': '公開された更新版を取得できません。', 'reason.storage': 'profile の更新記録を保存できませんでした。', 'reason.interrupted': '導入前の準備が中断されました。再確認してください。', 'reason.network': '配布サービスまたは DSH と通信できませんでした。',
     },
   }
@@ -133,13 +133,18 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   const FRAME = '[data-slot=root] > div', SIDEBAR = ':scope > div:has(> [data-slot=sidebar])', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
   const NEW_SESSION = '[data-slot=sidebar] button[class*="_newSession"]', EASE = '.28s cubic-bezier(.2,.8,.2,1)'
   const mobileCss = [
-    `${M}{--dsh-pwa-drawer:min(84vw,320px);-webkit-tap-highlight-color:transparent}`,
+    `${M}{--dsh-pwa-drawer:min(84vw,320px);--dsh-pwa-panel:min(88vw,440px);-webkit-tap-highlight-color:transparent}`,
     `${M} body{overscroll-behavior:none}`,
     `${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:1/span 2!important;grid-row:1;transition:transform ${EASE},border-radius ${EASE}}`,
     `${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;inset:0 auto 0 0;z-index:30;width:var(--dsh-pwa-drawer);box-sizing:border-box;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform ${EASE},visibility 0s linear .28s}`,
     `${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s}`,
     `${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=main]){transform:translateX(var(--dsh-pwa-drawer));border-radius:24px 0 0 24px;overflow:hidden}`,
     `${M} [data-slot=sidebar]>div{width:100%!important}`,
+    // The right panel (files, terminal…) opens fullscreen on narrow frames; present it as a drawer from the right instead.
+    `${M} ${FRAME}[data-rightbar-fullscreen]>div:has(>[data-slot=main]){transform:translateX(calc(-1 * var(--dsh-pwa-panel)));border-radius:0 24px 24px 0;overflow:hidden}`,
+    `${M} [data-sidebar-right-panel=fullscreen]{left:auto!important;width:var(--dsh-pwa-panel)!important;max-width:none!important;--dsh-sidebar-width:var(--dsh-pwa-panel)!important;padding-top:env(safe-area-inset-top);box-sizing:border-box}`,
+    `${M} [data-sidebar-right-panel=fullscreen][data-sidebar-right-open]{box-shadow:-8px 0 24px #0000001f;animation:dsh-pwa-panel-in ${EASE}}`,
+    `@keyframes dsh-pwa-panel-in{from{transform:translateX(100%)}}`,
     `${M} [data-width-handle]{display:none!important}`,
     `${M} [data-slot="conversation.header"]>header{padding-left:calc(env(safe-area-inset-left) + 64px)}`,
     `${M} [data-composer-seat]{padding-bottom:env(safe-area-inset-bottom)}`,
@@ -153,47 +158,44 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     `.dsh-pwa-menu,.dsh-pwa-scrim{pointer-events:auto;border:0;padding:0;-webkit-tap-highlight-color:transparent}`,
     `.dsh-pwa-menu{position:fixed;z-index:20;top:calc(env(safe-area-inset-top) + 8px);left:calc(env(safe-area-inset-left) + 12px);width:44px;height:44px;border-radius:50%!important;corner-shape:round!important;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-base) 78%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px var(--dsw-alias-border-l3,#0002),0 4px 16px #0000001f;cursor:pointer}`,
     `.dsh-pwa-scrim{position:fixed;z-index:20;inset:0 0 0 var(--dsh-pwa-drawer);background:#0000002e;cursor:default}`,
+    `.dsh-pwa-scrim[data-side=right]{inset:0 var(--dsh-pwa-panel) 0 0}`,
     `@media (prefers-reduced-motion:reduce){${M} ${FRAME}>div{transition:none!important}}`,
   ].join('')
   const icon = paths => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true }, paths.map(d => h('path', { key: d, d })))
-  const menuIcon = () => icon(['M4 8h16', 'M4 16h10']), newIcon = () => icon(['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'])
+  const menuIcon = () => icon(['M4 8h16', 'M4 16h10'])
   function toggleSidebar(ctx) {
     const layout = ctx.get?.('layout')
     if (layout?.toggleSidebar) layout.toggleSidebar()
     else document.querySelector('[data-slot=sidebar] button[class*="_toggle"]')?.click()
   }
-  /** Floating menu button while the drawer is closed; a tap-to-close scrim while it is open. */
+  // The right Sidebar keeps its own open state; its collapse control is the only close that keeps it in sync.
+  function closePanel() { document.querySelector('[data-sidebar-right-panel] button[data-sidebar-right-toggle]')?.click() }
+  /** Floating menu button while no drawer is open; a tap-to-close scrim beside whichever drawer is. */
   function MobileChrome({ ctx, mobile, locale }) {
     const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
     React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
-    const t = locale.bind(NS), [open, setOpen] = React.useState(false)
+    const t = locale.bind(NS), [open, setOpen] = React.useState(null)
     React.useEffect(() => {
       const frame = active && document.querySelector(FRAME)
       if (!frame) return
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
+      const side = () => frame.hasAttribute('data-rightbar-fullscreen') ? 'right' : isOpen() ? 'left' : null
       const close = () => { if (isOpen()) toggleSidebar(ctx) }
       const where = () => { const center = frame.querySelector(CENTER); return [ctx.get?.('layout')?.panelInfo?.getSnapshot?.()?.activePanelId, center?.querySelector('[data-conversation-session]')?.dataset.conversationSession, center?.querySelector('[data-slot=main]')?.childElementCount].join('|') }
       let last = where()
       // Like a native drawer: choosing a session, panel or New Session closes it.
-      const watch = new MutationObserver(() => { setOpen(isOpen()); const now = where(); if (now !== last) { last = now; close() } })
-      watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed', 'data-conversation-session'], subtree: true, childList: true })
+      const watch = new MutationObserver(() => { setOpen(side()); const now = where(); if (now !== last) { last = now; close() } })
+      watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed', 'data-rightbar-fullscreen', 'data-conversation-session'], subtree: true, childList: true })
       const onClick = event => { if (event.target.closest?.(`${FRAME} ${NEW_SESSION}`)) setTimeout(close) }
       document.addEventListener('click', onClick, true)
-      setOpen(isOpen())
+      setOpen(side())
       return () => { watch.disconnect(); document.removeEventListener('click', onClick, true) }
     }, [active])
     if (!active) return null
+    if (open === 'right') return h('button', { type: 'button', className: 'dsh-pwa-scrim', 'data-side': 'right', 'aria-label': t('mobile.closePanel'), onClick: closePanel })
     return open
       ? h('button', { type: 'button', className: 'dsh-pwa-scrim', 'aria-label': t('mobile.close'), onClick: () => toggleSidebar(ctx) })
       : h('button', { type: 'button', className: 'dsh-pwa-menu', 'aria-label': t('mobile.menu'), title: t('mobile.menu'), onClick: () => toggleSidebar(ctx) }, menuIcon())
-  }
-  /** Header shortcut that reuses the sidebar's own New Session action. */
-  function NewSessionAction({ mobile, locale }) {
-    const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
-    React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
-    if (!active) return null
-    const t = locale.bind(NS)
-    return h(Button, { size: 'sm', variant: 'ghost', icon: newIcon(), 'aria-label': t('mobile.newSession'), title: t('mobile.newSession'), onClick: () => document.querySelector(NEW_SESSION)?.click() })
   }
   function MobileUI({ mobile, locale }) {
     const state = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
@@ -249,7 +251,6 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     const t = ctx.locale.bind(NS)
     ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'dsh-pwa', order: 920, label: () => t('title') }, () => h(SettingsUI, { controller, mobile, locale: ctx.locale })))
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-pwa.mobile' }, () => h(MobileChrome, { ctx, mobile, locale: ctx.locale })))
-    ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'dsh-pwa.new-session', order: -20 }, () => h(NewSessionAction, { mobile, locale: ctx.locale })))
   }
   return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, copy }
 } })

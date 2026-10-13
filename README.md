@@ -89,12 +89,14 @@ Open **Settings → PWA & Mobile → Mobile layout** and choose:
 
 The choice is saved in that browser's `localStorage` only, so a phone and a desktop can differ. In mobile layout:
 
+- DSH's own UI is kept; only the way its side panels appear changes.
 - The left sidebar becomes a drawer opened by the floating menu button; the conversation slides aside and a tap on it, or choosing a session, panel or New Session, closes the drawer.
-- The conversation and composer use the full width; the header gets a New Session shortcut.
+- The right panel (files, terminal…) slides in from the right instead of covering the whole screen; a tap on the conversation closes it.
+- The conversation and composer use the full width.
 - Inputs use at least 16px text so iOS Safari does not zoom on focus; safe-area insets are respected.
 - The Settings dialog stacks its navigation above the page.
 
-Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the official `shell.overlay` and `conversation.session.header.utilities` slots; no DSH file is changed. The rules target DSH's slot markers and data attributes rather than generated class names, but they follow DSH's DOM and were checked against `0.2.1-alpha.2` only — switch to **Off** if a future DSH release breaks the layout.
+Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the official `shell.overlay` slot; no DSH file is changed. The rules target DSH's slot markers and data attributes rather than generated class names, but they follow DSH's DOM and were checked against `0.2.1-alpha.2` only — switch to **Off** if a future DSH release breaks the layout.
 
 ## Plugin updates
 
