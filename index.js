@@ -3,6 +3,9 @@
  * The host's existing WebServer owns all routes; no file in DSH is modified.
  */
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
+import { PluginUpdates } from './updates.js'
 
 export const name = 'dsh-pwa'
 export const inject = ['webServer']
@@ -43,7 +46,22 @@ function send(req, res, body, contentType, cacheControl) {
 }
 
 /** Mount routes before the stock SPA static-file fallback. */
-export function apply(ctx) {
+export function apply(ctx, _config, options = {}) {
+  // Updater ownership stays at the plugin root; optional connection routes may be remounted.
+  const profile = ctx.get?.('profileContext')
+  const updates = new PluginUpdates({
+    manager: () => ctx.get?.('pluginManager'), profileDir: profile?.dir,
+    runtimeVersion: async () => {
+      const moduleName = '@deepseek-ai/dsh-app-boot'
+      const resolved = profile?.installAnchor ? pathToFileURL(createRequire(profile.installAnchor).resolve(moduleName)).href : moduleName
+      return (await import(resolved)).getDshRuntimeVersion()
+    },
+    ...options.updates,
+  })
+  ctx.effect(() => () => updates.dispose())
+  if (typeof ctx.inject === 'function') ctx.inject(['connection'], child => registerUpdateRoutes(child, updates))
+  else if (ctx.connection?.fetch?.register) registerUpdateRoutes(ctx, updates)
+
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/manifest.webmanifest',
@@ -85,4 +103,32 @@ export function apply(ctx) {
       ].join(''),
     })
   })
+}
+
+/** These endpoints only mount through DSH's authenticated Connection, never on the public WebServer. */
+export function registerUpdateRoutes(ctx, updates) {
+  for (const action of ['status', 'check', 'begin', 'reconcile']) {
+    const method = `dsh-pwa/update-${action}`
+    ctx.connection.fetch.register({
+      path: `/api/${method}`, methods: ['POST'], requestBody: 'buffered',
+      async fetch(request) {
+        let rpcId
+        try {
+          if (request.headers.get('content-type')?.split(';')[0] !== 'application/json') return new Response('unsupported media type', { status: 415 })
+          const envelope = await request.json()
+          if (envelope?.type !== 'client-request' || typeof envelope.rpcId !== 'string' || envelope.rpcId.length > 100 || envelope.method !== method) return new Response('invalid request', { status: 400 })
+          rpcId = envelope.rpcId
+          request.signal.throwIfAborted()
+          const payload = envelope.payload
+          if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('invalid-request')
+          const value = action === 'begin' ? await updates.begin(payload.candidateId, payload.requestId, payload.profileKey) : action === 'reconcile' ? await updates.reconcile(payload.requestId) : await updates[action]()
+          return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } }, { headers: { 'cache-control': 'no-store' } })
+        } catch (error) {
+          if (rpcId === undefined) return new Response('invalid request', { status: 400 })
+          const code = ['invalid-request', 'busy', 'stale-candidate'].includes(error.message) ? error.message : 'update-failed'
+          return Response.json({ type: 'server-response', rpcId, result: { ok: false, error: { code: `dsh-pwa/${code}`, message: code, details: {} } } }, { headers: { 'cache-control': 'no-store' } })
+        }
+      },
+    })
+  }
 }

@@ -1,0 +1,218 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { randomUUID, createHash } from 'node:crypto'
+import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, checkCompatibility, resultState, sourceKind, boundedFetch } from '../updates.js'
+const version = '0.3.0', tag = `v${version}`
+const filename = `dsh-pwa-${version}.tgz`
+const download = `https://github.com/${REPOSITORY}/releases/download/${tag}/`
+const release = { id: 7, tag_name: tag, html_url: `https://github.com/${REPOSITORY}/releases/tag/${tag}`, draft: false, prerelease: false, body: 'Changes', assets: [filename, 'SHA256SUMS'].map((name, i) => ({ name, id: i + 1, size: 50, browser_download_url: download + name })) }
+const pkg = { name: PACKAGE, version, main: './index.js', exports: { './client': './client.js' }, files: ['index.js', 'updates.js', 'client.js', 'cordis.patch.yml', 'assets/*.png'], dsh: { bundle: { patch: './cordis.patch.yml' }, client: { platform: 'web' } }, peerDependencies: { '@deepseek-ai/dsh-app-boot': '0.2.1-alpha.2' } }
+async function fetcher(input) {
+  const url = String(input)
+  if (url.endsWith('/releases/latest')) return Response.json(release)
+  if (url.endsWith('/package.json')) return Response.json(pkg)
+  if (url.endsWith('/cordis.patch.yml')) return new Response('- insert:\n    - id: dsh-pwa\n      name: dsh-pwa\n')
+  if (url.endsWith('.png')) return new Response(await readFile(new URL(`../assets/${url.split('/').at(-1)}`, import.meta.url)))
+  if (url.endsWith('.js')) return new Response('source entry')
+  throw new Error(url)
+}
+async function fixture(t, overrides = {}) {
+  const directory = await mkdtemp(join(tmpdir(), 'pi-update-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const calls = []
+  const bundle = { name: PACKAGE, installed: true, enabled: false, version: '0.2.0', source: `github:${REPOSITORY}` }
+  const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, installBundle: async (...args) => { calls.push(args); bundle.version = version; return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } } }
+  const updater = new PluginUpdates({ manager: () => manager, profileDir: directory, runtimeVersion: async () => '0.2.1-alpha.2', fetcher, version: '0.2.0', ...overrides })
+  t.after(() => updater.dispose())
+  return { updater, manager, bundle, calls, directory }
+}
+async function settle(updater) { while (updater.running) await new Promise(resolve => setTimeout(resolve, 5)) }
+
+test('strict SemVer ordering, numeric prereleases, build metadata and invalid metadata', () => {
+  assert.equal(compareVersions('0.10.0', '0.9.0'), 1)
+  assert.equal(compareVersions('1.0.0-alpha.10', '1.0.0-alpha.2'), 1)
+  assert.equal(compareVersions('1.0.0', '1.0.0-rc.1'), 1)
+  assert.equal(compareVersions('1.0.0+x', '1.0.0+y'), 0)
+  for (const invalid of ['01.0.0', '1.0', '1.0.0-01', '', null]) assert.throws(() => semanticVersion(invalid))
+})
+test('release schema, stable channel and compatibility are fail closed without requiring assets', () => {
+  const candidate = releaseCandidate(release, '0.2.0')
+  assert.equal(releaseCandidate(release, version), null)
+  assert.equal(checkCompatibility(pkg, candidate, '0.2.1-alpha.2'), '0.2.1-alpha.2')
+  assert.throws(() => checkCompatibility(pkg, candidate, '0.2.1'), /incompatible/)
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-llm': '^0.2.1' } }, candidate, '0.2.1'), /compatibility-unknown/)
+  for (const value of [{ ...release, prerelease: true }, { ...release, draft: true }, { ...release, assets: 'invalid' }, { ...release, tag_name: 'garbage' }]) assert.throws(() => releaseCandidate(value, '0.2.0'))
+  assert.ok(candidate)
+  assert.ok(releaseCandidate({ ...release, assets: [] }, '0.2.0'))
+})
+test('only the original GitHub source family can update; local/registry/tarballs stay manual', () => {
+  for (const source of [`github:${REPOSITORY}#v0.2.0`, `git+https://github.com/${REPOSITORY}.git#abc`]) assert.equal(sourceKind(source), 'github')
+  for (const source of ['/tmp/a.tgz', 'file:/tmp/a.tgz', PACKAGE, 'github:evil/repo', download + filename]) assert.throws(() => sourceKind(source))
+})
+test('bounded retrieval refuses hostile redirects, streaming oversize and network failure', async () => {
+  const url = `https://api.github.com/repos/${REPOSITORY}/releases/latest`
+  await assert.rejects(boundedFetch(url, 5, { fetcher: async () => new Response(null, { status: 302, headers: { location: 'https://evil.example/payload' } }) }), /redirect/)
+  await assert.rejects(boundedFetch(url, 5, { fetcher: async () => new Response('123456') }), /size/)
+  await assert.rejects(boundedFetch(url, 5, { fetcher: async () => new Response('', { status: 500 }) }), /network/)
+  await assert.rejects(boundedFetch(url, 5, { signal: AbortSignal.abort(), fetcher: async () => new Response('123') }))
+})
+test('manager results distinguish application, failure, cancellation, override and unknown', () => {
+  const result = { bundle: PACKAGE, version, application: 'applied', changed: true }
+  assert.equal(resultState(result, version, version, { installed: true, version }), 'applied')
+  assert.equal(resultState(result, version, '0.2.0'), 'unknown')
+  for (const application of ['failed', 'cancelled', 'overridden', 'restart-required']) assert.equal(resultState({ ...result, application }, version, version, { installed: true, version }), application)
+  assert.equal(resultState({ ...result, packageResult: { exitCode: 0, timedOut: true } }, version, version), 'failed')
+  assert.equal(resultState(null, version, version), 'unknown')
+})
+test('single pinned install preserves disabled selection; journal supports reconnection and runtime verification', async t => {
+  const { updater, manager, calls, directory, bundle } = await fixture(t)
+  const checked = await updater.check(), requestId = randomUUID()
+  assert.equal(checked.status, 'available')
+  await updater.begin(checked.candidate.id, requestId, updater.base().profileKey)
+  await updater.begin(checked.candidate.id, requestId, updater.base().profileKey)
+  await settle(updater)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0][0], `github:${REPOSITORY}#${tag}`)
+  assert.deepEqual(calls[0][1], { enabled: false, requestId, saveExact: true })
+  assert.equal((await updater.reconcile(requestId)).status, 'restart-required')
+  const restarted = new PluginUpdates({ manager: () => manager, profileDir: directory, version, runtimeVersion: async () => '0.2.1-alpha.2' })
+  bundle.version = '0.2.0'
+  assert.equal((await restarted.reconcile(requestId)).status, 'unknown')
+  bundle.version = version
+  assert.equal((await restarted.reconcile(requestId)).status, 'applied')
+})
+test('missing manager/read-only/source reject before networking and an ongoing operation rejects begin', async t => {
+  const { updater, bundle } = await fixture(t, { fetcher: async () => { throw new Error('unexpected fetch') } })
+  bundle.readOnlyReason = 'management-required'
+  assert.equal((await updater.check()).reason, 'read-only')
+  delete bundle.readOnlyReason; bundle.source = 'file:/tmp/untrusted.tgz'
+  assert.equal((await updater.check()).reason, 'source')
+  const missing = await fixture(t, { manager: () => undefined })
+  assert.equal((await missing.updater.status()).reason, 'manager-unavailable')
+  const busy = await fixture(t, { isBusy: () => true })
+  await busy.updater.check()
+  await assert.rejects(busy.updater.begin('7', randomUUID(), busy.updater.base().profileKey), /busy/)
+})
+test('tag manifest and required icon/client/patch files are validated before manager', async t => {
+  for (const badFile of ['package.json', 'client.js', 'cordis.patch.yml', 'icon-512.png']) {
+    const h = await fixture(t, { fetcher: async url => String(url).endsWith(badFile) ? new Response(badFile === 'package.json' ? JSON.stringify({ ...pkg, name: 'other-package' }) : '') : fetcher(url) })
+    assert.equal((await h.updater.check()).status, 'blocked')
+    assert.equal(h.calls.length, 0)
+  }
+})
+test('forgotten request is unknown, never successful or automatically resubmitted', async t => {
+  const { updater, calls, directory } = await fixture(t)
+  const id = randomUUID()
+  await updater.privateDir()
+  await writeFile(join(directory, '.dsh-pwa-updates', `${id}.json`), JSON.stringify({ requestId: id, version, status: 'installing' }))
+  assert.equal((await updater.reconcile(id)).status, 'unknown')
+  assert.equal(calls.length, 0)
+  await writeFile(join(directory, '.dsh-pwa-updates', `${id}.json`), JSON.stringify({ requestId: id, version, status: 'preparing' }))
+  assert.equal((await updater.reconcile(id)).status, 'failed')
+})
+
+test('disposal aborts source preparation before manager invocation', async t => {
+  const h = await fixture(t)
+  await h.updater.check()
+  h.updater.fetcher = async (_url, { signal }) => { signal.throwIfAborted(); return Response.json(release) }
+  await h.updater.begin('7', randomUUID(), h.updater.base().profileKey); h.updater.dispose(); await settle(h.updater)
+  assert.equal(h.calls.length, 0)
+})
+test('post-invocation transport failure remains unknown and reconciles the original manager request', async t => {
+  const { updater, manager, bundle, directory, calls } = await fixture(t)
+  let waited = 0
+  manager.installBundle = async (...args) => { calls.push(args); bundle.version = version; throw new Error('response lost after manager admission') }
+  manager.waitForInstall = async () => { waited++; return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } }
+  await updater.check(); const id = randomUUID(); await updater.begin('7', id, updater.base().profileKey); await settle(updater)
+  assert.equal((await updater.reconcile(id)).status, 'restart-required')
+  assert.equal(waited, 1); assert.equal(calls.length, 1)
+  const restarted = new PluginUpdates({ manager: () => manager, profileDir: directory, version, runtimeVersion: async () => '0.2.1-alpha.2' })
+  assert.equal((await restarted.reconcile(id)).status, 'applied')
+  assert.equal(calls.length, 1)
+})
+
+test('disposal or busy state during the awaited journal save cannot start manager installation', async t => {
+  for (const action of ['dispose', 'login']) {
+    let busy = false, reached, release
+    const waiting = new Promise(resolve => { reached = resolve })
+    const gate = new Promise(resolve => { release = resolve })
+    const { updater, calls } = await fixture(t, { isBusy: () => busy })
+    const save = updater.save.bind(updater)
+    updater.save = async operation => { await save(operation); if (operation.status === 'installing') { reached(); await gate } }
+    await updater.check(); await updater.begin('7', randomUUID(), updater.base().profileKey); await waiting
+    if (action === 'dispose') updater.dispose(); else busy = true
+    release(); await settle(updater)
+    assert.equal(calls.length, 0)
+  }
+})
+
+test('Release absence, API failure and no newer candidate are distinct; checks coalesce', async t => {
+  const missing = await fixture(t, { fetcher: async () => new Response('', { status: 404 }) })
+  assert.equal((await missing.updater.check()).status, 'no-release')
+  const unavailable = await fixture(t, { fetcher: async () => new Response('', { status: 500 }) })
+  assert.equal((await unavailable.updater.check()).status, 'blocked')
+  assert.equal((await unavailable.updater.check()).reason, 'network')
+  const current = await fixture(t)
+  current.bundle.version = version
+  current.updater.version = version
+  assert.equal((await current.updater.check()).status, 'current')
+  let calls = 0
+  const shared = await fixture(t, { fetcher: async url => { calls++; return fetcher(url) } })
+  const [a, b] = await Promise.all([shared.updater.check(), shared.updater.check()])
+  assert.deepEqual(a, b)
+  assert.equal(calls, 9) // metadata, manifest, four entries, three icons
+})
+
+test('unknown original operation blocks any newer candidate and two profiles keep separate journals', async t => {
+  const h = await fixture(t)
+  h.manager.installBundle = async () => { h.calls.push('started'); throw new Error('reply lost') }
+  await h.updater.check()
+  const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
+  assert.equal((await h.updater.reconcile(id)).status, 'unknown')
+  h.updater.candidate = { ...h.updater.candidate, id: '8', version: '0.4.0' }
+  await assert.rejects(h.updater.begin('8', randomUUID(), h.updater.base().profileKey), /busy/)
+  assert.equal(h.calls.length, 1)
+  const other = await fixture(t)
+  assert.equal((await other.updater.status()).status, 'idle')
+  assert.notEqual(other.updater.base().profileKey, h.updater.base().profileKey)
+  await other.updater.check(); await other.updater.begin('7', randomUUID(), other.updater.base().profileKey); await settle(other.updater)
+  assert.equal(other.calls.length, 1)
+})
+
+test('nominal success with wrong actual installed version stays unknown and never resends', async t => {
+  const h = await fixture(t)
+  h.manager.installBundle = async (...args) => { h.calls.push(args); return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } }
+  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
+  assert.equal((await h.updater.reconcile(id)).status, 'unknown')
+  assert.equal((await h.updater.reconcile(id)).installedVersion, '0.2.0')
+  await assert.rejects(h.updater.begin('7', randomUUID(), h.updater.base().profileKey), /busy/)
+  assert.equal(h.calls.length, 1)
+  h.bundle.version = version
+  assert.equal((await h.updater.reconcile(id)).status, 'restart-required')
+  h.updater.version = version
+  assert.equal((await h.updater.reconcile(id)).status, 'applied')
+})
+
+test('external newer version during installing receipt write prevents a downgrade', async t => {
+  const h = await fixture(t)
+  const save = h.updater.save.bind(h.updater)
+  h.updater.save = async (operation, claim) => { await save(operation, claim); if (operation.status === 'installing') h.bundle.version = '0.4.0' }
+  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
+  assert.equal((await h.updater.reconcile(id)).reason, 'stale-candidate')
+  assert.equal(h.calls.length, 0)
+})
+
+test('delayed request from another profile is refused before admission', async t => {
+  const first = await fixture(t), second = await fixture(t)
+  await first.updater.check(); await second.updater.check()
+  await assert.rejects(second.updater.begin('7', randomUUID(), first.updater.base().profileKey), /invalid-request/)
+  await assert.rejects(second.updater.begin('7', randomUUID()), /invalid-request/)
+  assert.equal(second.calls.length, 0); assert.equal(await second.updater.lastOperation(), undefined)
+})
+
+test('manager cancellation and override retain their terminal outcome despite package exit', () => {
+  for (const application of ['cancelled', 'overridden']) assert.equal(resultState({ application, packageResult: { exitCode: 130, timedOut: true } }, '0.3.0', '0.2.0'), application)
+})
