@@ -1,8 +1,10 @@
-# dsh-pwa
+# dsh-pwa — PWA & Mobile
 
-A small, installable [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **Web** plugin that gives home-screen shortcuts a crisp DeepSeek-branded icon and installable PWA metadata. Works when the Web UI is opened locally or through an HTTPS reverse proxy, including **Tailscale Serve**, on iPad, iPhone, and other supported browsers.
+A small, installable [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **Web** plugin that gives home-screen shortcuts a crisp DeepSeek-branded icon and installable PWA metadata, and adds an optional phone layout for the Web UI. Works when the Web UI is opened locally or through an HTTPS reverse proxy, including **Tailscale Serve**, on iPad, iPhone, and other supported browsers.
 
-**Not an Electron/Desktop patch.** It does not change the native desktop app icon, add offline support, or make the Web UI mobile-responsive.
+The settings page is shown as **PWA & Mobile**. The package, bundle and plugin ID stay `dsh-pwa`, so existing installations and the updater keep working.
+
+**Not an Electron/Desktop patch.** It does not change the native desktop app icon or add offline support.
 
 ## Features
 
@@ -13,6 +15,7 @@ A small, installable [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 - No service worker, build step, external server, credentials, or additional runtime dependencies
 - Uses official Cordis WebServer hooks; leaves DSH files untouched
 - Optional PWA settings page with English/Japanese update controls and a profile-owned installation journal
+- Mobile layout switch (Auto / On / Off) on the same settings page: a slide-out sidebar drawer, a floating menu button and full-width conversation on phones
 
 ## Installation
 
@@ -76,6 +79,23 @@ To uninstall:
 dsh plugin --profile web remove -w dsh-pwa
 ```
 
+## Mobile layout
+
+Open **Settings → PWA & Mobile → Mobile layout** and choose:
+
+- **Auto** (default): mobile layout on screens narrower than 768px.
+- **On**: always, for example on an iPad.
+- **Off**: the stock DSH layout.
+
+The choice is saved in that browser's `localStorage` only, so a phone and a desktop can differ. In mobile layout:
+
+- The left sidebar becomes a drawer opened by the floating menu button; the conversation slides aside and a tap on it, or choosing a session, panel or New Session, closes the drawer.
+- The conversation and composer use the full width; the header gets a New Session shortcut.
+- Inputs use at least 16px text so iOS Safari does not zoom on focus; safe-area insets are respected.
+- The Settings dialog stacks its navigation above the page.
+
+Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the official `shell.overlay` and `conversation.session.header.utilities` slots; no DSH file is changed. The rules target DSH's slot markers and data attributes rather than generated class names, but they follow DSH's DOM and were checked against `0.2.1-alpha.2` only — switch to **Off** if a future DSH release breaks the layout.
+
 ## Plugin updates
 
 The PWA page in Settings shows the running plugin version. Checking is separate from installing. It distinguishes no published Release, no newer stable version, API failure, unsupported DSH, installation failure, restart required, and confirmed running version. The page uses DSH's shared React and native Button; no build or prepare step is added.
@@ -97,7 +117,7 @@ npm pack --ignore-scripts
 npm run test:browser
 ```
 
-Node's built-in runner checks static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
+Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the automatic mobile layout switch at 390px, and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
 
 ## License
 

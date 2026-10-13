@@ -77,7 +77,7 @@ try {
       const onboarding = page.getByRole('button', { name: 'Configure later', exact: true })
       if (await onboarding.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await onboarding.click()
       await page.getByRole('button', { name: /Settings|設定/ }).first().click()
-      await page.getByRole('dialog').getByText('PWA', { exact: true }).first().click()
+      await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       const panel = page.locator('.dsh-pwa-updates')
       await panel.getByText(`プラグインの実行版: ${manifest.version}`, { exact: true }).waitFor()
       const state = await page.evaluate(async () => {
@@ -104,6 +104,7 @@ try {
         await panel.getByRole('button', { name: '更新を確認', exact: true }).click()
         await panel.getByRole('button', { name: '更新を確認', exact: true }).waitFor()
         await page.waitForFunction(() => !document.querySelector('.dsh-pwa-updates button')?.disabled)
+        assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile')), width < 768, `mobile layout follows auto mode at ${width}px`)
         const overflow = await panel.evaluate(element => element.scrollWidth - element.clientWidth)
         assert.ok(overflow <= 1, `PWA panel overflow at ${width}px: ${overflow}`)
         await page.screenshot({ path: join(world, `pwa-${restart}-${width}-ja.png`), fullPage: false })
