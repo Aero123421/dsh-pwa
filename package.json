@@ -1,6 +1,6 @@
 {
   "name": "dsh-pwa",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Installable iOS/iPadOS and browser PWA icons for DeepSeek Harness Web",
   "type": "module",
   "main": "./index.js",
@@ -10,18 +10,36 @@
     "assets/*.png",
     "LICENSE",
     "LICENSE.DeepSeek",
-    "NOTICE.md"
+    "NOTICE.md",
+    "client.js",
+    "updates.js",
+    "README.md",
+    "docs"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "external": [
+        "react",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
     }
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "pack:plugin": "npm pack --ignore-scripts",
+    "test:browser": "node scripts/browser-check.mjs"
   },
   "keywords": [
     "dsh-plugin",
@@ -31,5 +49,20 @@
     "ipad",
     "tailscale"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.2.1-alpha.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js"
+  }
 }
