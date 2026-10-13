@@ -84,3 +84,44 @@ test('profile change clears old in-memory request before later connection failur
   await controller.load(); assert.equal(controller.requestId, undefined)
   fail = true; await controller.load(); assert.equal(controller.state.status, 'blocked'); controller.dispose()
 })
+
+function media(matches) {
+  const listeners = new Set()
+  return { query: { get matches() { return matches }, addEventListener: (_type, fn) => listeners.add(fn), removeEventListener: (_type, fn) => listeners.delete(fn) },
+    set(value) { matches = value; for (const fn of listeners) fn() }, listeners }
+}
+function root() { const attrs = new Set(); return { attrs, toggleAttribute: (name, on) => { if (on) attrs.add(name); else attrs.delete(name) }, removeAttribute: name => attrs.delete(name) } }
+
+test('mobile layout defaults to auto and follows the narrow-screen query', async () => {
+  const { MobileController } = await clientExports()
+  const narrow = media(false), html = root(), seen = []
+  const mobile = new MobileController({ storage: storage(), matchMedia: () => narrow.query, root: html })
+  mobile.subscribe(() => seen.push(mobile.getSnapshot().active))
+  assert.deepEqual({ ...mobile.getSnapshot() }, { mode: 'auto', active: false }); assert.equal(html.attrs.has('data-dsh-mobile'), false)
+  narrow.set(true); assert.equal(html.attrs.has('data-dsh-mobile'), true)
+  narrow.set(false); assert.deepEqual(seen, [true, false])
+  mobile.dispose(); assert.equal(narrow.listeners.size, 0); assert.equal(html.attrs.has('data-dsh-mobile'), false)
+})
+
+test('mobile layout choice is saved per browser and ignores unknown modes', async () => {
+  const { MobileController } = await clientExports()
+  const saved = storage(), narrow = media(true), html = root()
+  const first = new MobileController({ storage: saved, matchMedia: () => narrow.query, root: html })
+  first.setMode('off'); assert.equal(saved.getItem('dsh-pwa:mobile-ui'), 'off'); assert.equal(html.attrs.has('data-dsh-mobile'), false)
+  first.setMode('sideways'); assert.equal(first.getSnapshot().mode, 'off'); first.dispose()
+  const desktop = media(false)
+  const second = new MobileController({ storage: saved, matchMedia: () => desktop.query, root: html })
+  assert.equal(second.getSnapshot().mode, 'off'); second.setMode('on')
+  assert.deepEqual({ ...second.getSnapshot() }, { mode: 'on', active: true }); assert.equal(html.attrs.has('data-dsh-mobile'), true)
+  saved.setItem('dsh-pwa:mobile-ui', 'bogus'); second.dispose()
+  const fallback = new MobileController({ storage: saved, matchMedia: () => desktop.query, root: html })
+  assert.equal(fallback.getSnapshot().mode, 'auto'); fallback.dispose()
+})
+
+test('mobile layout survives missing storage and matchMedia', async () => {
+  const { MobileController } = await clientExports()
+  const broken = { getItem() { throw new Error('denied') }, setItem() { throw new Error('denied') } }
+  const mobile = new MobileController({ storage: broken, matchMedia: () => undefined, root: root() })
+  assert.deepEqual({ ...mobile.getSnapshot() }, { mode: 'auto', active: false })
+  mobile.setMode('on'); assert.equal(mobile.getSnapshot().active, true); mobile.dispose()
+})
