@@ -71,8 +71,8 @@ test('single pinned install preserves disabled selection; journal supports recon
   const { updater, manager, calls, directory, bundle } = await fixture(t)
   const checked = await updater.check(), requestId = randomUUID()
   assert.equal(checked.status, 'available')
-  await updater.begin(checked.candidate.id, requestId)
-  await updater.begin(checked.candidate.id, requestId)
+  await updater.begin(checked.candidate.id, requestId, updater.base().profileKey)
+  await updater.begin(checked.candidate.id, requestId, updater.base().profileKey)
   await settle(updater)
   assert.equal(calls.length, 1)
   assert.equal(calls[0][0], `github:${REPOSITORY}#${tag}`)
@@ -94,7 +94,7 @@ test('missing manager/read-only/source reject before networking and an ongoing o
   assert.equal((await missing.updater.status()).reason, 'manager-unavailable')
   const busy = await fixture(t, { isBusy: () => true })
   await busy.updater.check()
-  await assert.rejects(busy.updater.begin('7', randomUUID()), /busy/)
+  await assert.rejects(busy.updater.begin('7', randomUUID(), busy.updater.base().profileKey), /busy/)
 })
 test('tag manifest and required icon/client/patch files are validated before manager', async t => {
   for (const badFile of ['package.json', 'client.js', 'cordis.patch.yml', 'icon-512.png']) {
@@ -118,7 +118,7 @@ test('disposal aborts source preparation before manager invocation', async t => 
   const h = await fixture(t)
   await h.updater.check()
   h.updater.fetcher = async (_url, { signal }) => { signal.throwIfAborted(); return Response.json(release) }
-  await h.updater.begin('7', randomUUID()); h.updater.dispose(); await settle(h.updater)
+  await h.updater.begin('7', randomUUID(), h.updater.base().profileKey); h.updater.dispose(); await settle(h.updater)
   assert.equal(h.calls.length, 0)
 })
 test('post-invocation transport failure remains unknown and reconciles the original manager request', async t => {
@@ -126,7 +126,7 @@ test('post-invocation transport failure remains unknown and reconciles the origi
   let waited = 0
   manager.installBundle = async (...args) => { calls.push(args); bundle.version = version; throw new Error('response lost after manager admission') }
   manager.waitForInstall = async () => { waited++; return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } }
-  await updater.check(); const id = randomUUID(); await updater.begin('7', id); await settle(updater)
+  await updater.check(); const id = randomUUID(); await updater.begin('7', id, updater.base().profileKey); await settle(updater)
   assert.equal((await updater.reconcile(id)).status, 'restart-required')
   assert.equal(waited, 1); assert.equal(calls.length, 1)
   const restarted = new PluginUpdates({ manager: () => manager, profileDir: directory, version, runtimeVersion: async () => '0.2.1-alpha.2' })
@@ -142,7 +142,7 @@ test('disposal or busy state during the awaited journal save cannot start manage
     const { updater, calls } = await fixture(t, { isBusy: () => busy })
     const save = updater.save.bind(updater)
     updater.save = async operation => { await save(operation); if (operation.status === 'installing') { reached(); await gate } }
-    await updater.check(); await updater.begin('7', randomUUID()); await waiting
+    await updater.check(); await updater.begin('7', randomUUID(), updater.base().profileKey); await waiting
     if (action === 'dispose') updater.dispose(); else busy = true
     release(); await settle(updater)
     assert.equal(calls.length, 0)
@@ -170,25 +170,25 @@ test('unknown original operation blocks any newer candidate and two profiles kee
   const h = await fixture(t)
   h.manager.installBundle = async () => { h.calls.push('started'); throw new Error('reply lost') }
   await h.updater.check()
-  const id = randomUUID(); await h.updater.begin('7', id); await settle(h.updater)
+  const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
   assert.equal((await h.updater.reconcile(id)).status, 'unknown')
   h.updater.candidate = { ...h.updater.candidate, id: '8', version: '0.4.0' }
-  await assert.rejects(h.updater.begin('8', randomUUID()), /busy/)
+  await assert.rejects(h.updater.begin('8', randomUUID(), h.updater.base().profileKey), /busy/)
   assert.equal(h.calls.length, 1)
   const other = await fixture(t)
   assert.equal((await other.updater.status()).status, 'idle')
   assert.notEqual(other.updater.base().profileKey, h.updater.base().profileKey)
-  await other.updater.check(); await other.updater.begin('7', randomUUID()); await settle(other.updater)
+  await other.updater.check(); await other.updater.begin('7', randomUUID(), other.updater.base().profileKey); await settle(other.updater)
   assert.equal(other.calls.length, 1)
 })
 
 test('nominal success with wrong actual installed version stays unknown and never resends', async t => {
   const h = await fixture(t)
   h.manager.installBundle = async (...args) => { h.calls.push(args); return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } }
-  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id); await settle(h.updater)
+  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
   assert.equal((await h.updater.reconcile(id)).status, 'unknown')
   assert.equal((await h.updater.reconcile(id)).installedVersion, '0.2.0')
-  await assert.rejects(h.updater.begin('7', randomUUID()), /busy/)
+  await assert.rejects(h.updater.begin('7', randomUUID(), h.updater.base().profileKey), /busy/)
   assert.equal(h.calls.length, 1)
   h.bundle.version = version
   assert.equal((await h.updater.reconcile(id)).status, 'restart-required')
@@ -200,7 +200,15 @@ test('external newer version during installing receipt write prevents a downgrad
   const h = await fixture(t)
   const save = h.updater.save.bind(h.updater)
   h.updater.save = async (operation, claim) => { await save(operation, claim); if (operation.status === 'installing') h.bundle.version = '0.4.0' }
-  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id); await settle(h.updater)
+  await h.updater.check(); const id = randomUUID(); await h.updater.begin('7', id, h.updater.base().profileKey); await settle(h.updater)
   assert.equal((await h.updater.reconcile(id)).reason, 'stale-candidate')
   assert.equal(h.calls.length, 0)
+})
+
+test('delayed request from another profile is refused before admission', async t => {
+  const first = await fixture(t), second = await fixture(t)
+  await first.updater.check(); await second.updater.check()
+  await assert.rejects(second.updater.begin('7', randomUUID(), first.updater.base().profileKey), /invalid-request/)
+  await assert.rejects(second.updater.begin('7', randomUUID()), /invalid-request/)
+  assert.equal(second.calls.length, 0); assert.equal(await second.updater.lastOperation(), undefined)
 })

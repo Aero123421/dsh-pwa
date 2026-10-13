@@ -191,7 +191,8 @@ export class PluginUpdates {
     return this.checking
   }
   publicCandidate(candidate) { const { id, version, url, notes, compatibility } = candidate; return { id, version, url, notes, compatibility } }
-  async begin(id, operationId) {
+  async begin(id, operationId, profileKey) {
+    if (!profileKey || profileKey !== this.base().profileKey) throw new Error('invalid-request')
     if (typeof operationId !== 'string') throw new Error('invalid-request')
     const requestId = updateRequestId(operationId)
     await this.capability()

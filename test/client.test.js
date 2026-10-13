@@ -20,7 +20,7 @@ test('Client owns ID before first request; lost reply and another Client discove
   let accepted
   const connection = { rpc: { call: async (_path, method, payload) => {
     calls.push(method)
-    if (method.endsWith('begin')) { accepted = payload.requestId; assert.equal(saved.getItem('dsh-pwa:update:profileA'), accepted); throw new Error('disconnected') }
+    if (method.endsWith('begin')) { assert.equal(payload.profileKey, 'profileA'); accepted = payload.requestId; assert.equal(saved.getItem('dsh-pwa:update:profileA'), accepted); throw new Error('disconnected') }
     return { ok: true, value: { profileKey: 'profileA', requestId: accepted, status: accepted ? 'restart-required' : 'idle' } }
   } } }
   const first = new UpdateController(connection, saved)

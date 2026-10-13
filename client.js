@@ -77,7 +77,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       this.remember(requestId) // Own the ID before the first request, including a lost reply.
       this.publish({ ...this.state, status: 'starting' })
       try {
-        const state = await this.call('begin', { candidateId: candidate.id, requestId })
+        const state = await this.call('begin', { candidateId: candidate.id, requestId, profileKey: this.profileKey })
         if (this.closed || generation !== this.generation) return
         if (state.requestId !== requestId) throw new Error('invalid result')
         this.publish({ ...this.state, ...state }); await this.load()

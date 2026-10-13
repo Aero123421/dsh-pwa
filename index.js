@@ -121,7 +121,7 @@ export function registerUpdateRoutes(ctx, updates) {
           request.signal.throwIfAborted()
           const payload = envelope.payload
           if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('invalid-request')
-          const value = action === 'begin' ? await updates.begin(payload.candidateId, payload.requestId) : action === 'reconcile' ? await updates.reconcile(payload.requestId) : await updates[action]()
+          const value = action === 'begin' ? await updates.begin(payload.candidateId, payload.requestId, payload.profileKey) : action === 'reconcile' ? await updates.reconcile(payload.requestId) : await updates[action]()
           return Response.json({ type: 'server-response', rpcId, result: { ok: true, value } }, { headers: { 'cache-control': 'no-store' } })
         } catch (error) {
           if (rpcId === undefined) return new Response('invalid request', { status: 400 })

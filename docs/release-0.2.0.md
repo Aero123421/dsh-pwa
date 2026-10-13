@@ -15,7 +15,7 @@ manifest identity・start_url・scope・アイコンと URL は維持します�
 ## 検証記録
 
 - `npm ci --ignore-scripts`: この checkout の開発依存を導入。
-- `npm test`: 27 件が成功。Node の単体検査。静的 route、optional services、route の解除、Release metadata、導入結果、複数 Client / profile、自己解除、結果不明を確認。
+- `npm test`: 28 件が成功。Node の単体検査。静的 route、optional services、route の解除、Release metadata、導入結果、複数 Client / profile、自己解除、結果不明を確認。
 - `node --check index.js` / `updates.js` / `client.js`: 配布 JavaScript の構文検査。
 - `npm pack --ignore-scripts`: package / patch / Host / Client / PNG が公開形式に含まれることを確認。tgz は検証用で、更新先をソースから tgz に自動変更しません。
 - `npm run test:browser`: npm 版 DSH 0.2.1-alpha.2 のクリーンな profile への tgz 導入、再起動後の実行版、認証拒否、manifest / PNG、日本語の標準 UI を 1280px / 600px / 390px で確認する検査。
