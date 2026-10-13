@@ -102,13 +102,13 @@ Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the offi
 
 The PWA page in Settings shows the running plugin version. Checking is separate from installing. It distinguishes no published Release, no newer stable version, API failure, unsupported DSH, installation failure, restart required, and confirmed running version. The page uses DSH's shared React and native Button; no build or prepare step is added.
 
-Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. This first versioned release is prepared as **v0.2.0**; publication is a separate reviewed step. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and three PNG files are checked under the exact tag before installation. The updater's optional DSH peer is `0.2.1-alpha.2`; existing static PWA features do not require updater services.
+Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and three PNG files are checked under the exact tag before installation. The updater's optional DSH peer is `0.2.1-alpha.2`; existing static PWA features do not require updater services.
 
 Operation IDs are saved before the first request. The Host stores only update metadata/results under the current profile's `.dsh-pwa-updates/`, so reconnecting browsers and replacement plugin instances reconcile the original operation. An unknown result is never automatically resubmitted. Disabled bundle selection is preserved, and an installed newer version is never downgraded by the updater.
 
 Plugin updates do not change manifest identity, `start_url`, `scope`, or icon URLs. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language.
 
-[Release preparation and verification](docs/release-0.2.0.md).
+[Current release notes](docs/release-0.3.0.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
 
 ## Test
 
@@ -119,7 +119,7 @@ npm pack --ignore-scripts
 npm run test:browser
 ```
 
-Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the automatic mobile layout switch at 390px, and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
+Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the 767/768px automatic boundary, saved modes, drawer opening/closing and reselection, files, composer text size, light/dark appearance, reduced motion, desktop recovery, and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
 
 ## License
 

@@ -130,8 +130,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     dispose() { this.query?.removeEventListener?.('change', this.onChange); this.root?.removeAttribute?.('data-dsh-mobile'); this.listeners.clear() }
   }
   // DSH layout hooks without hashed class names: frame data attributes, slot markers and :has().
-  const FRAME = '[data-slot=root] > div', SIDEBAR = ':scope > div:has(> [data-slot=sidebar])', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
-  const NEW_SESSION = '[data-slot=sidebar] button[class*="_newSession"]', EASE = '.28s cubic-bezier(.2,.8,.2,1)'
+  const FRAME = '[data-slot=root] > div', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
+  const EASE = '.28s cubic-bezier(.2,.8,.2,1)'
   const mobileCss = [
     `${M}{--dsh-pwa-drawer:min(84vw,320px);--dsh-pwa-panel:min(88vw,440px);-webkit-tap-highlight-color:transparent}`,
     `${M} body{overscroll-behavior:none}`,
@@ -145,7 +145,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     `${M} [data-sidebar-right-panel=fullscreen]{left:auto!important;width:var(--dsh-pwa-panel)!important;max-width:none!important;--dsh-sidebar-width:var(--dsh-pwa-panel)!important;padding-top:env(safe-area-inset-top);box-sizing:border-box}`,
     `${M} [data-sidebar-right-panel=fullscreen][data-sidebar-right-open]{box-shadow:-8px 0 24px #0000001f;animation:dsh-pwa-panel-in ${EASE}}`,
     `@keyframes dsh-pwa-panel-in{from{transform:translateX(100%)}}`,
-    `${M} [data-width-handle]{display:none!important}`,
+    `${M} ${FRAME}>div[data-side]{display:none!important}`,
     `${M} [data-slot="conversation.header"]>header{padding-left:calc(env(safe-area-inset-left) + 64px)}`,
     `${M} [data-composer-seat]{padding-bottom:env(safe-area-inset-bottom)}`,
     `${M} [data-composer-input],${M} input,${M} textarea{font-size:max(16px,1em)}`,
@@ -159,14 +159,17 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     `.dsh-pwa-menu{position:fixed;z-index:20;top:calc(env(safe-area-inset-top) + 8px);left:calc(env(safe-area-inset-left) + 12px);width:44px;height:44px;border-radius:50%!important;corner-shape:round!important;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-base) 78%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px var(--dsw-alias-border-l3,#0002),0 4px 16px #0000001f;cursor:pointer}`,
     `.dsh-pwa-scrim{position:fixed;z-index:20;inset:0 0 0 var(--dsh-pwa-drawer);background:#0000002e;cursor:default}`,
     `.dsh-pwa-scrim[data-side=right]{inset:0 var(--dsh-pwa-panel) 0 0}`,
-    `@media (prefers-reduced-motion:reduce){${M} ${FRAME}>div{transition:none!important}}`,
+    `@media (prefers-reduced-motion:reduce){${M} ${FRAME}>div{transition:none!important}${M} [data-sidebar-right-panel]{transition:none!important;animation:none!important}}`,
   ].join('')
   const icon = paths => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true }, paths.map(d => h('path', { key: d, d })))
   const menuIcon = () => icon(['M4 8h16', 'M4 16h10'])
   function toggleSidebar(ctx) {
     const layout = ctx.get?.('layout')
     if (layout?.toggleSidebar) layout.toggleSidebar()
-    else document.querySelector('[data-slot=sidebar] button[class*="_toggle"]')?.click()
+    else {
+      const t = ctx.locale.bind('sidebar'), labels = [t('toggle.open'), t('toggle.collapse')]
+      Array.from(document.querySelectorAll('[data-slot=sidebar] button')).find(button => labels.includes(button.getAttribute('aria-label')))?.click()
+    }
   }
   // The right Sidebar keeps its own open state; its collapse control is the only close that keeps it in sync.
   function closePanel() { document.querySelector('[data-sidebar-right-panel] button[data-sidebar-right-toggle]')?.click() }
@@ -186,10 +189,20 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Like a native drawer: choosing a session, panel or New Session closes it.
       const watch = new MutationObserver(() => { setOpen(side()); const now = where(); if (now !== last) { last = now; close() } })
       watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed', 'data-rightbar-fullscreen', 'data-conversation-session'], subtree: true, childList: true })
-      const onClick = event => { if (event.target.closest?.(`${FRAME} ${NEW_SESSION}`)) setTimeout(close) }
+      let closeTimer
+      const onClick = event => {
+        const target = event.target
+        if (!target.closest?.('[data-slot=sidebar]')) return
+        const button = target.closest('button')
+        const newSession = button?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
+        const panel = target.closest('nav button')
+        // Row action buttons and rename inputs do not select the session.
+        const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
+        if (newSession || panel || session) { clearTimeout(closeTimer); closeTimer = setTimeout(close) }
+      }
       document.addEventListener('click', onClick, true)
       setOpen(side())
-      return () => { watch.disconnect(); document.removeEventListener('click', onClick, true) }
+      return () => { clearTimeout(closeTimer); watch.disconnect(); document.removeEventListener('click', onClick, true) }
     }, [active])
     if (!active) return null
     if (open === 'right') return h('button', { type: 'button', className: 'dsh-pwa-scrim', 'data-side': 'right', 'aria-label': t('mobile.closePanel'), onClick: closePanel })
