@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
-import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, checkCompatibility, resultState, sourceKind, boundedFetch } from '../updates.js'
+import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
 const version = '0.3.0', tag = `v${version}`
 const filename = `dsh-pwa-${version}.tgz`
 const download = `https://github.com/${REPOSITORY}/releases/download/${tag}/`
@@ -24,7 +24,7 @@ async function fixture(t, overrides = {}) {
   t.after(() => rm(directory, { recursive: true, force: true }))
   const calls = []
   const bundle = { name: PACKAGE, installed: true, enabled: false, version: '0.2.0', source: `github:${REPOSITORY}` }
-  const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, installBundle: async (...args) => { calls.push(args); bundle.version = version; return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } } }
+  const manager = { listBundles: async () => [bundle], waitForInstall: async () => null, removeBundle: async () => { throw new Error('unexpected remove') }, installBundle: async (...args) => { calls.push(args); bundle.version = version; return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version } } }
   const updater = new PluginUpdates({ manager: () => manager, profileDir: directory, runtimeVersion: async () => '0.2.1-alpha.2', fetcher, version: '0.2.0', ...overrides })
   t.after(() => updater.dispose())
   return { updater, manager, bundle, calls, directory }
@@ -43,7 +43,11 @@ test('release schema, stable channel and compatibility are fail closed without r
   assert.equal(releaseCandidate(release, version), null)
   assert.equal(checkCompatibility(pkg, candidate, '0.2.1-alpha.2'), '0.2.1-alpha.2')
   assert.throws(() => checkCompatibility(pkg, candidate, '0.2.1'), /incompatible/)
-  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-llm': '^0.2.1' } }, candidate, '0.2.1'), /compatibility-unknown/)
+  assert.equal(checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-app-boot': '>=0.2.1-alpha.2 <0.3.0-0' } }, candidate, '0.2.1-alpha.3'), '0.2.1-alpha.3')
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-app-boot': '>=0.2.1-alpha.2 <0.3.0-0' } }, candidate, '0.3.0-alpha.1'), /incompatible/)
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-llm': 'not-a-range' } }, candidate, '0.2.1-alpha.3'), /incompatible/)
+  assert.equal(checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh': 'workspace:^' } }, candidate, '0.2.1-alpha.3'), '0.2.1-alpha.3')
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: {} }, candidate, '0.2.1-alpha.3'), /compatibility-unknown/)
   for (const value of [{ ...release, prerelease: true }, { ...release, draft: true }, { ...release, assets: 'invalid' }, { ...release, tag_name: 'garbage' }]) assert.throws(() => releaseCandidate(value, '0.2.0'))
   assert.ok(candidate)
   assert.ok(releaseCandidate({ ...release, assets: [] }, '0.2.0'))
@@ -211,6 +215,86 @@ test('delayed request from another profile is refused before admission', async t
   await assert.rejects(second.updater.begin('7', randomUUID(), first.updater.base().profileKey), /invalid-request/)
   await assert.rejects(second.updater.begin('7', randomUUID()), /invalid-request/)
   assert.equal(second.calls.length, 0); assert.equal(await second.updater.lastOperation(), undefined)
+})
+
+test('a semver peer range accepts the running 0.2.1 prereleases and rejects the next major', async t => {
+  const ranged = { ...pkg, peerDependencies: { '@deepseek-ai/dsh-app-boot': '>=0.2.1-alpha.2 <0.3.0-0' } }
+  const accept = await fixture(t, { runtimeVersion: async () => '0.2.1-alpha.3', fetcher: async url => String(url).endsWith('/package.json') ? Response.json(ranged) : fetcher(url) })
+  const checked = await accept.updater.check()
+  assert.equal(checked.status, 'available')
+  assert.equal(checked.candidate.compatibility, '0.2.1-alpha.3')
+  const reject = await fixture(t, { runtimeVersion: async () => '0.3.0-alpha.1', fetcher: async url => String(url).endsWith('/package.json') ? Response.json(ranged) : fetcher(url) })
+  assert.equal((await reject.updater.check()).reason, 'incompatible')
+  assert.equal(reject.calls.length, 0)
+})
+
+test('already-installed removes then installs, including after this plugin is stopped', async t => {
+  const h = await fixture(t)
+  const seen = []
+  h.manager.installBundle = async (...args) => {
+    seen.push(['install', args[0], args[1]])
+    if (seen.filter(row => row[0] === 'install').length === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: args[0], bundle: PACKAGE }
+    h.bundle.version = version
+    return { changed: true, application: 'applied', stage: 'install', target: PACKAGE, bundle: PACKAGE, version }
+  }
+  h.manager.removeBundle = async (name) => {
+    seen.push(['remove', name])
+    h.updater.dispose()
+    return { application: 'applied', changed: true, stage: 'remove', target: name }
+  }
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.deepEqual(seen.map(row => row[0]), ['install', 'remove', 'install'])
+  assert.equal(seen[0][1], `github:${REPOSITORY}#${tag}`)
+  assert.deepEqual(seen[2][2], { enabled: false, requestId: id, saveExact: true })
+  assert.equal((await h.updater.reconcile(id)).status, 'unknown')
+  const restarted = new PluginUpdates({ manager: () => h.manager, profileDir: h.directory, version, runtimeVersion: async () => '0.2.1-alpha.3' })
+  t.after(() => restarted.dispose())
+  assert.equal((await restarted.reconcile(id)).status, 'applied')
+})
+
+test('stop-profile leaves the package installed and installs over it', async t => {
+  const h = await fixture(t)
+  let installs = 0
+  h.manager.installBundle = async (...args) => {
+    h.calls.push(args)
+    installs += 1
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: args[0] }
+    h.bundle.version = version
+    return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version }
+  }
+  h.manager.removeBundle = async () => ({ application: 'failed', changed: false, error: { code: 'stop-profile' }, stage: 'remove', target: PACKAGE })
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.equal(h.calls.length, 2)
+  assert.equal((await h.updater.reconcile(id)).status, 'restart-required')
+})
+
+test('a failed removal does not install another copy', async t => {
+  const h = await fixture(t)
+  h.manager.installBundle = async (...args) => {
+    h.calls.push(args)
+    return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: args[0] }
+  }
+  h.manager.removeBundle = async () => ({ application: 'failed', changed: false, error: { code: 'bundle-in-use' }, stage: 'remove', target: PACKAGE })
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.equal(h.calls.length, 1)
+  const settled = await h.updater.reconcile(id)
+  assert.equal(settled.status, 'failed')
+  assert.equal(settled.result.error.code, 'bundle-in-use')
+})
+
+test('already-installed without removeBundle stays failed and does not throw', async () => {
+  const manager = { installBundle: async () => ({ application: 'failed', changed: false, error: { code: 'already-installed' } }) }
+  const result = await installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, { enabled: true, saveExact: true })
+  assert.equal(result.error.code, 'already-installed')
 })
 
 test('manager cancellation and override retain their terminal outcome despite package exit', () => {

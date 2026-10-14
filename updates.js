@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, writeFile, readFile, rename, lstat } from 'node:fs/promises'
 import { join } from 'node:path'
+import semver from 'semver'
 import manifest from './package.json' with { type: 'json' }
 
 export const REPOSITORY = 'Aero123421/dsh-pwa'
@@ -91,18 +92,46 @@ export function releaseCandidate(release, current) {
   const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes: release.body.slice(0, 6000) }
   return compareVersions(version, current) > 0 ? candidate : null
 }
-/** Compare the exact optional DSH peer declared by source releases; unknown ranges stay manual. */
+const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
+
+/** Same peer rule as DSH app-boot: prereleases match, and workspace:^, workspace:~, and workspace:* mean the running version. */
+function dshPeerMatches(runtime, range) {
+  const requirement = WORKSPACE_PEER.has(range) ? runtime : range
+  if (typeof requirement !== 'string' || requirement.trim() === '') return false
+  try { return semver.satisfies(runtime, requirement, { includePrerelease: true }) }
+  catch { return false }
+}
+
+/**
+ * Accept a candidate whose @deepseek-ai/dsh* peers the running DSH satisfies.
+ * A release with no such peer, or a non-string range, stays manual.
+ * An unsatisfied or unparsable range is incompatible: DSH would skip that bundle at boot.
+ */
 export function checkCompatibility(packageJson, candidate, runtime) {
   semanticVersion(runtime)
   if (!packageJson || packageJson.name !== PACKAGE || packageJson.version !== candidate.version || typeof packageJson.dsh?.bundle?.patch !== 'string') throw new Error('metadata')
   const peers = Object.entries(packageJson.peerDependencies ?? {}).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
   if (!peers.length || peers.some(([, range]) => typeof range !== 'string')) throw new Error('compatibility-unknown')
-  // PWA update releases declare exact DSH peers. Other ranges require review.
-  for (const [, range] of peers) {
-    try { semanticVersion(range) } catch { throw new Error('compatibility-unknown') }
-    if (range !== runtime) throw new Error('incompatible')
-  }
+  for (const [, range] of peers) if (!dshPeerMatches(runtime, range)) throw new Error('incompatible')
   return runtime
+}
+
+/**
+ * Install a spec that may already be installed.
+ * A different git ref still installs on DSH 0.2.1-alpha.3, so try installBundle first and leave this plugin loaded.
+ * already-installed is returned before pnpm when the spec names the saved dependency (HMR on).
+ * The official Web update then calls removeBundle and installBundle from ui-plugin-manager, which stays loaded.
+ * stop-profile means the bundle is still installed, so the same installBundle runs over it.
+ * Both calls here use the plugin manager service: with HMR, removeBundle stops this plugin before it returns,
+ * and that service still accepts the installBundle that follows.
+ */
+export async function installBundleUpdating(manager, spec, options) {
+  const installed = await manager.installBundle(spec, options)
+  if (installed?.error?.code !== 'already-installed' || typeof manager.removeBundle !== 'function') return installed
+  const removed = await manager.removeBundle(PACKAGE)
+  if (removed?.error?.code === 'stop-profile') return manager.installBundle(spec, options)
+  if (removed?.application !== 'applied' && removed?.application !== 'restart-required') return removed ?? installed
+  return manager.installBundle(spec, options)
 }
 function safeResult(result) {
   if (!result) return null
@@ -236,7 +265,7 @@ export class PluginUpdates {
       if (this.closed || this.isBusy() || final.bundle.source !== before.bundle.source) throw new Error('busy')
       if (compareVersions(candidate.version, final.bundle.version) <= 0) throw new Error('stale-candidate')
       managerInvoked = true
-      const result = await final.manager.installBundle(spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true })
+      const result = await installBundleUpdating(final.manager, spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true })
       operation.result = safeResult(result)
       const installed = (await final.manager.listBundles()).find(bundle => bundle.name === PACKAGE)
       operation.status = resultState(result, operation.version, this.version, installed)

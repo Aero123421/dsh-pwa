@@ -12,14 +12,14 @@ The settings page is shown as **PWA & Mobile**. The package, bundle and plugin I
 - PWA icons in 192×192 and 512×512 PNG sizes
 - `DeepSeek Harness` app name, `DSH` short name, and `standalone` display mode
 - Relative URLs for correct PWA identity on supported proxy subpaths
-- No service worker, build step, external server, credentials, or additional runtime dependencies
+- No service worker, build step, external server, or credentials. The updater depends on `semver` for the same prerelease-inclusive peer check DSH uses
 - Uses official Cordis WebServer hooks; leaves DSH files untouched
 - Optional PWA settings page with English/Japanese update controls and a profile-owned installation journal
 - Mobile layout switch (Auto / On / Off) on the same settings page: a slide-out sidebar drawer, a floating menu button and full-width conversation on phones
 
 ## Installation
 
-Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject` (developed against the upstream `0.2.1-alpha.2` API).
+Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The mobile layout was checked against the 0.2.1-alpha.2 DOM.
 
 Install directly from GitHub into the **web** profile:
 
@@ -102,7 +102,9 @@ Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the offi
 
 The PWA page in Settings shows the running plugin version. Checking is separate from installing. It distinguishes no published Release, no newer stable version, API failure, unsupported DSH, installation failure, restart required, and confirmed running version. The page uses DSH's shared React and native Button; no build or prepare step is added.
 
-Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and three PNG files are checked under the exact tag before installation. The updater's optional DSH peer is `0.2.1-alpha.2`; existing static PWA features do not require updater services.
+Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and three PNG files are checked under the exact tag before installation. Its `@deepseek-ai/dsh*` peers must satisfy the running DSH version under the same rule as app-boot (`includePrerelease`). A release with no such peer stays manual. Static PWA routes do not require the updater.
+
+On DSH 0.2.1-alpha.3 with HMR, `installBundle` of a spec that names the saved dependency fails with `already-installed` before pnpm runs. A different git ref still installs. When the result is `already-installed`, this updater follows the official Plugins update: `removeBundle`, then `installBundle`, keeping the previous enabled selection and `saveExact`. If removal returns `stop-profile`, the bundle is still installed and `installBundle` runs over it. Any other removal failure leaves the package in place. The calls use the plugin manager service. With HMR, `removeBundle` stops this plugin before it returns; that service still accepts the following `installBundle`. The official update does the same pair from the plugin manager page, which stays loaded.
 
 Operation IDs are saved before the first request. The Host stores only update metadata/results under the current profile's `.dsh-pwa-updates/`, so reconnecting browsers and replacement plugin instances reconcile the original operation. An unknown result is never automatically resubmitted. Disabled bundle selection is preserved, and an installed newer version is never downgraded by the updater.
 
@@ -115,9 +117,12 @@ Plugin updates do not change manifest identity, `start_url`, `scope`, or icon UR
 ```bash
 npm ci
 npm test
+npm run check:dsh-peer
 npm pack --ignore-scripts
 npm run test:browser
 ```
+
+`npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
 
 Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the 767/768px automatic boundary, saved modes, drawer opening/closing and reselection, files, composer text size, light/dark appearance, reduced motion, desktop recovery, and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
 

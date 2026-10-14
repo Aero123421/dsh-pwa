@@ -36,6 +36,8 @@ jobs:
           NODE
       - run: npm ci --ignore-scripts
       - run: npm test
+      - name: Check the DSH peer against the published app-boot alpha
+        run: npm run check:dsh-peer
       - name: Check distributed JavaScript
         run: |
           node --check index.js
