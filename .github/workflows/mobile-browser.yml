@@ -20,6 +20,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - run: git archive HEAD --format=tar -o /tmp/dsh-pwa-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verification-source
+          path: /tmp/dsh-pwa-source.tar
+          retention-days: 1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
