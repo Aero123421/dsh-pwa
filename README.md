@@ -112,7 +112,7 @@ Operation IDs are saved before the first request. The Host stores only update me
 
 Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The any-purpose icons stay at `./pwa/icon-192.png` and `./pwa/icon-512.png`. The manifest also publishes `./pwa/icon-192-maskable.png` and `./pwa/icon-512-maskable.png` for Android adaptive icons. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language.
 
-[Current release notes](docs/release-0.3.0.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
+[Current release notes](docs/release-0.3.1.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
 
 ## Test
 
