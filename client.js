@@ -279,6 +279,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s;box-shadow:8px 0 24px #0002}
     ${M} [data-slot=sidebar]>div{width:100%!important}
     ${M} [data-slot=sidebar] nav button{min-height:44px}
+    ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
     ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding-bottom:env(safe-area-inset-bottom)}
     ${M} ${FRAME}>div[data-side]{display:none!important}
     ${M} [data-composer-seat]{min-width:0;padding-bottom:env(safe-area-inset-bottom)}
@@ -309,7 +310,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   const closeIcon = () => icon(['M6 6l12 12', 'M18 6L6 18'])
   function toggleSidebar(ctx) { ctx.get?.('layout')?.toggleSidebar() }
   // Closing the occupant, not layout.closeRightbar(), keeps its state in sync.
-  function closePanel() { document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open] button[data-sidebar-right-toggle]')?.click() }
+  function openRightPanel(root = document) { return [...root.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(panel => !panel.closest('[hidden]')) }
+  function closePanel() { openRightPanel()?.querySelector('button[data-sidebar-right-toggle]')?.click() }
   function MobileChrome({ ctx, mobile, locale }) {
     const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
     React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
@@ -324,7 +326,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
       let previous = null, timer
       const sync = () => {
-        const next = right?.querySelector('[data-sidebar-right-open]') ? 'right' : isOpen() ? 'left' : null
+        const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
         setOpen(next)
         if (center) center.inert = originalInert.get(center) || next !== null
         if (sidebar) sidebar.inert = originalInert.get(sidebar) || next !== 'left'
@@ -338,7 +340,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Observe geometry only, not streaming messages or the conversation subtree.
       const watch = new MutationObserver(sync)
       watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] })
-      if (right) watch.observe(right, { subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-open'], childList: true })
+      if (right) watch.observe(right, { subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-open', 'hidden'], childList: true })
       const info = ctx.get?.('layout')?.panelInfo
       let panel = info?.getSnapshot().activePanelId
       const offPanel = info?.subscribe(() => { const next = info.getSnapshot().activePanelId; if (next !== panel) { panel = next; close() } })

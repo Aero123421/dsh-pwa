@@ -1,13 +1,15 @@
 name: Mobile browser verification
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'client.js'
       - 'index.js'
+      - 'package*.json'
+      - 'assets/**'
+      - 'test/**'
       - 'scripts/browser-check.mjs'
       - '.github/workflows/mobile-browser.yml'
-  push:
-    branches: ['fix/mobile-layout-and-pwa-install']
 permissions:
   contents: read
 concurrency:
@@ -36,8 +38,8 @@ jobs:
           mkdir -p /tmp/pwa-browser-evidence
           shopt -s nullglob
           for image in /tmp/dsh-pwa-smoke-*/*.png; do cp "$image" /tmp/pwa-browser-evidence/; done
-          # This command log contains only a freshly generated fixture profile,
-          # never a running server URL or an existing user profile.
+          # Only the freshly generated fixture's bootstrap command log is printed.
+          # Server logs and authentication URLs are not uploaded.
           for log in /tmp/dsh-pwa-smoke-*/command.log; do
             sed -E 's/(token=)[^[:space:]"&]+/\1[redacted]/g' "$log" | tail -40
           done
