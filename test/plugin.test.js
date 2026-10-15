@@ -101,7 +101,7 @@ test('exports Cordis entry and cleanly unregisters every contribution', () => {
   const app = harness()
   assert.deepEqual([...app.routes.keys()], [
     '/manifest.webmanifest', '/pwa/apple-touch-icon.png',
-    '/pwa/icon-192.png', '/pwa/icon-512.png', '/pwa/icon-512-maskable.png',
+    '/pwa/icon-192.png', '/pwa/icon-512.png', '/pwa/icon-192-maskable.png', '/pwa/icon-512-maskable.png',
   ])
   assert.equal(app.handlers.has('webserver/index-inject'), true)
   app.dispose()
@@ -122,9 +122,9 @@ test('manifest uses relative paths and provides installable raster icons', async
   assert.equal(body.start_url, './')
   assert.equal(body.scope, './')
   assert.equal(body.id, undefined)
-  assert.deepEqual(body.icons.map(icon => icon.sizes), ['192x192', '512x512', '512x512'])
-  assert.deepEqual(body.icons.map(icon => icon.src), ['./pwa/icon-192.png', './pwa/icon-512.png', './pwa/icon-512-maskable.png'])
-  assert.deepEqual(body.icons.map(icon => icon.purpose), ['any', 'any', 'maskable'])
+  assert.deepEqual(body.icons.map(icon => icon.sizes), ['192x192', '512x512', '192x192', '512x512'])
+  assert.deepEqual(body.icons.map(icon => icon.src), ['./pwa/icon-192.png', './pwa/icon-512.png', './pwa/icon-192-maskable.png', './pwa/icon-512-maskable.png'])
+  assert.deepEqual(body.icons.map(icon => icon.purpose), ['any', 'any', 'maskable', 'maskable'])
   assert.equal((await call(route, 'HEAD')).body, undefined)
   assert.equal((await call(route, 'POST')).status, 405)
   app.dispose()
@@ -132,7 +132,7 @@ test('manifest uses relative paths and provides installable raster icons', async
 
 test('serves opaque PNG assets with correct dimensions', async () => {
   const app = harness()
-  for (const [name, size] of [['apple-touch-icon', 180], ['icon-192', 192], ['icon-512', 512], ['icon-512-maskable', 512]]) {
+  for (const [name, size] of [['apple-touch-icon', 180], ['icon-192', 192], ['icon-512', 512], ['icon-192-maskable', 192], ['icon-512-maskable', 512]]) {
     const route = app.routes.get(`/pwa/${name}.png`)
     const res = await call(route)
     assert.equal(res.status, 200)
@@ -148,27 +148,31 @@ test('serves opaque PNG assets with correct dimensions', async () => {
   app.dispose()
 })
 
-test('maskable icon is a separate 512 image and its artwork stays inside the safe circle', async () => {
+test('maskable icons are separate images and their artwork stays inside the safe circle', async () => {
   const app = harness()
   const manifest = JSON.parse((await call(app.routes.get('/manifest.webmanifest'))).body)
-  const maskable = manifest.icons.find(icon => icon.purpose === 'maskable')
-  assert.equal(maskable.src, './pwa/icon-512-maskable.png')
-  assert.equal(maskable.sizes, '512x512')
-  const png = (await call(app.routes.get('/pwa/icon-512-maskable.png'))).body
-  const any = (await call(app.routes.get('/pwa/icon-512.png'))).body
-  assert.notEqual(Buffer.compare(png, any), 0)
-  const image = decodePng(png)
-  const radius = 0.4 * image.width
-  let content = 0
-  for (let y = 0; y < image.height; y++) {
-    for (let x = 0; x < image.width; x++) {
-      const pixel = image.pixel(x, y)
-      if (pixel[0] >= 250 && pixel[1] >= 250 && pixel[2] >= 250) continue
-      content += 1
-      assert.ok(Math.hypot(x + 0.5 - image.width / 2, y + 0.5 - image.height / 2) <= radius, `content outside the maskable safe circle at ${x},${y}`)
+  const maskable = manifest.icons.filter(icon => icon.purpose === 'maskable')
+  assert.deepEqual(maskable.map(icon => [icon.src, icon.sizes]), [
+    ['./pwa/icon-192-maskable.png', '192x192'],
+    ['./pwa/icon-512-maskable.png', '512x512'],
+  ])
+  for (const icon of maskable) {
+    const png = (await call(app.routes.get(icon.src.replace('./', '/')))).body
+    const any = (await call(app.routes.get(icon.sizes === '192x192' ? '/pwa/icon-192.png' : '/pwa/icon-512.png'))).body
+    assert.notEqual(Buffer.compare(png, any), 0)
+    const image = decodePng(png)
+    const radius = 0.4 * image.width
+    let content = 0
+    for (let y = 0; y < image.height; y++) {
+      for (let x = 0; x < image.width; x++) {
+        const pixel = image.pixel(x, y)
+        if (pixel[0] >= 250 && pixel[1] >= 250 && pixel[2] >= 250) continue
+        content += 1
+        assert.ok(Math.hypot(x + 0.5 - image.width / 2, y + 0.5 - image.height / 2) <= radius, `${icon.src} content outside the maskable safe circle at ${x},${y}`)
+      }
     }
+    assert.ok(content > 1000, icon.src)
   }
-  assert.ok(content > 1000)
   app.dispose()
 })
 

@@ -133,14 +133,27 @@ async function packageInstalled(manager) {
 }
 
 /**
+ * Whether resultState classifies this manager result as failed.
+ * The installed row passed here matches the result's own version, so a clean
+ * restart-required stays restart-required. Absence is checked separately.
+ * already-installed names the saved spec and is not a failed replacement.
+ * cancelled and overridden stay those states even when packageResult failed.
+ */
+function replacementFailed(result) {
+  if (!result || result.error?.code === 'already-installed') return false
+  const version = typeof result.version === 'string' ? result.version : '0.0.0'
+  return resultState(result, version, version, { installed: true, version }) === 'failed'
+}
+
+/**
  * Reinstall the spec and enabled state saved before removeBundle.
- * Used only when the replacement failed or was cancelled and this package is absent.
- * A listBundles failure counts as still present, so an unknown profile is left alone.
+ * Used when resultState is failed and listBundles confirms this package is absent.
+ * That includes application failed, an error, and restart-required whose packageResult
+ * exited non-zero or timed out. A listBundles failure counts as still present.
  * The restore install uses a new requestId. If the package is still absent, restore.application is failed.
  */
 export async function restoreIfMissing(manager, installed, saved, persist) {
-  const terminal = installed?.application === 'failed' || installed?.application === 'cancelled'
-  if (!terminal || installed?.error?.code === 'already-installed') return installed
+  if (!replacementFailed(installed)) return installed
   if (await packageInstalled(manager) !== false) return installed
   if (typeof persist === 'function') await persist(installed).catch(() => {})
   if (!saved?.source || typeof manager.installBundle !== 'function') return { ...installed, restore: { application: 'failed' } }
@@ -177,16 +190,27 @@ async function replaceOrRestore(manager, spec, options, saved, persist) {
  * Both calls use the plugin manager service: with HMR, removeBundle stops this plugin before it returns,
  * and that service still accepts the installBundle that follows.
  * previous.source and previous.enabled are the installed spec before removal.
- * If the later install fails and this package is gone, restoreIfMissing puts that spec back.
+ * If the later install's resultState is failed and this package is gone, restoreIfMissing puts that spec back.
+ * If removeBundle throws, the same restore runs only when the list confirms the package is absent.
+ * A thrown removal that leaves the package listed, or a listBundles failure, is rethrown.
  */
 export async function installBundleUpdating(manager, spec, options, previous) {
   const installed = await manager.installBundle(spec, options)
   if (installed?.error?.code !== 'already-installed' || typeof manager.removeBundle !== 'function') return installed
   const saved = savedSelection(options, previous)
-  const removed = await manager.removeBundle(PACKAGE)
-  if (removed?.error?.code === 'stop-profile') return replaceOrRestore(manager, spec, options, saved, previous?.persist)
+  const persist = previous?.persist
+  let removed
+  try {
+    removed = await manager.removeBundle(PACKAGE)
+  } catch (error) {
+    const failed = { changed: false, application: 'failed', stage: 'remove', target: PACKAGE, bundle: PACKAGE, error: { code: 'operation-error' } }
+    const outcome = await restoreIfMissing(manager, failed, saved, persist)
+    if (outcome.restore) return outcome
+    throw error
+  }
+  if (removed?.error?.code === 'stop-profile') return replaceOrRestore(manager, spec, options, saved, persist)
   if (removed?.application !== 'applied' && removed?.application !== 'restart-required') return removed ?? installed
-  return replaceOrRestore(manager, spec, options, saved, previous?.persist)
+  return replaceOrRestore(manager, spec, options, saved, persist)
 }
 function safeResult(result) {
   if (!result) return null
@@ -254,7 +278,7 @@ export class PluginUpdates {
       const bytes = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/${file}`, 256 * 1024, options)
       if (!bytes.length || (file === 'cordis.patch.yml' && (!bytes.toString().includes('id: dsh-pwa') || !bytes.toString().includes('name: dsh-pwa')))) throw new Error('metadata')
     }
-    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-512-maskable.png', 512]]) {
+    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-192-maskable.png', 192], ['icon-512-maskable.png', 512]]) {
       const png = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/assets/${file}`, 512 * 1024, options)
       if (png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw new Error('metadata')
     }

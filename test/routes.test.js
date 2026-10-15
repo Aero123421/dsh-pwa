@@ -30,7 +30,7 @@ async function call(route, method, payload = {}, envelope = {}) {
 test('missing optional connection/manager never removes public PWA routes; reconnect owns only API routes', async () => {
   const app = scope()
   apply(app.ctx)
-  assert.equal(app.routes.size, 5)
+  assert.equal(app.routes.size, 6)
   assert.deepEqual(app.injections[0].names, ['connection'])
   const disconnect = app.connectionChild()
   assert.equal(app.api.size, 4)
@@ -39,10 +39,10 @@ test('missing optional connection/manager never removes public PWA routes; recon
   assert.equal(state.ok, true)
   assert.equal(state.value.status, 'blocked')
   assert.equal(state.value.reason, 'manager-unavailable')
-  disconnect(); assert.equal(app.api.size, 0); assert.equal(app.routes.size, 5)
+  disconnect(); assert.equal(app.api.size, 0); assert.equal(app.routes.size, 6)
   const next = app.connectionChild(); assert.equal(app.api.size, 4)
   next(); app.dispose(); assert.equal(app.routes.size, 0); assert.equal(app.listeners.size, 0)
-  const reenabled = scope(); apply(reenabled.ctx); assert.equal(reenabled.routes.size, 5); reenabled.dispose()
+  const reenabled = scope(); apply(reenabled.ctx); assert.equal(reenabled.routes.size, 6); reenabled.dispose()
 })
 
 test('authenticated Connection envelopes are validated; updater failures do not leak diagnostics', async () => {

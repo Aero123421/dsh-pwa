@@ -109,12 +109,12 @@ try {
       }
       const freshManifest = await (await page.request.get(`${origin}/manifest.webmanifest`)).json()
       assert.equal(freshManifest.start_url, './'); assert.equal(freshManifest.scope, './'); assert.equal(freshManifest.id, undefined)
-      const maskable = freshManifest.icons.find(icon => String(icon.purpose ?? '').split(/\s+/).includes('maskable'))
-      assert.equal(maskable?.sizes, '512x512')
-      assert.equal(maskable?.src, './pwa/icon-512-maskable.png')
+      const maskable = freshManifest.icons.filter(icon => String(icon.purpose ?? '').split(/\s+/).includes('maskable'))
+      assert.deepEqual(maskable.map(icon => icon.sizes), ['192x192', '512x512'])
+      assert.deepEqual(maskable.map(icon => icon.src), ['./pwa/icon-192-maskable.png', './pwa/icon-512-maskable.png'])
       assert.ok(freshManifest.icons.some(icon => icon.purpose === 'any' && icon.sizes === '192x192'))
       assert.ok(freshManifest.icons.some(icon => icon.purpose === 'any' && icon.sizes === '512x512'))
-      for (const [filename, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-512-maskable.png', 512]]) {
+      for (const [filename, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-192-maskable.png', 192], ['icon-512-maskable.png', 512]]) {
         const response = await page.request.get(`${origin}/pwa/${filename}`), png = await response.body()
         assert.equal(response.status(), 200); assert.equal(png.readUInt32BE(16), size); assert.equal(png.readUInt32BE(20), size)
       }
