@@ -1,0 +1,44 @@
+name: Mobile browser verification
+on:
+  pull_request:
+    paths:
+      - 'client.js'
+      - 'index.js'
+      - 'scripts/browser-check.mjs'
+      - 'scripts/mobile-*.mjs'
+      - '.github/workflows/mobile-browser.yml'
+  push:
+    branches: ['fix/mobile-layout-and-pwa-install']
+permissions:
+  contents: read
+concurrency:
+  group: mobile-browser-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - run: npm install --global @deepseek-ai/dsh@0.2.1-alpha.3
+      - run: npx playwright install --with-deps chromium
+      - run: npm pack --ignore-scripts
+      - run: npm run test:browser
+        env:
+          DSH_TELEMETRY_MODE: DISABLED
+      - name: Collect screenshots only (no authentication logs)
+        if: always()
+        run: |
+          mkdir -p /tmp/pwa-browser-evidence
+          find /tmp -maxdepth 2 -path '/tmp/dsh-pwa-smoke-*/*.png' -exec cp {} /tmp/pwa-browser-evidence/ \;
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mobile-browser-screenshots
+          path: /tmp/pwa-browser-evidence/*.png
+          if-no-files-found: ignore
+          retention-days: 14
