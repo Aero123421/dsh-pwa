@@ -115,7 +115,7 @@ export function apply(ctx, _config, options = {}) {
       kind: 'html',
       placement: 'head',
       html: [
-        '<link data-dsh-pwa rel="manifest" href="./manifest.webmanifest">',
+        '<link data-dsh-pwa rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">',
         '<link rel="apple-touch-icon" sizes="180x180" href="./pwa/apple-touch-icon.png">',
         '<meta name="apple-mobile-web-app-title" content="DeepSeek Harness">',
         '<meta name="apple-mobile-web-app-capable" content="yes">',

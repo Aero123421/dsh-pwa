@@ -9,6 +9,7 @@ on:
       - 'assets/**'
       - 'test/**'
       - 'scripts/browser-check.mjs'
+      - 'scripts/pwa-proxy-check.mjs'
       - '.github/workflows/mobile-browser.yml'
 permissions:
   contents: read
@@ -27,6 +28,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
       - run: npx playwright install --with-deps chromium
+      - run: node scripts/pwa-proxy-check.mjs
       - run: npm pack --ignore-scripts
       - run: npm run test:browser
         env:

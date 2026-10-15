@@ -74,7 +74,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         })
       }
     }
-    patch('link[rel="manifest"]', 'link', { rel: 'manifest', href: './manifest.webmanifest' })
+    patch('link[rel="manifest"]', 'link', { rel: 'manifest', href: './manifest.webmanifest', crossorigin: 'use-credentials' })
     patch('link[rel="apple-touch-icon"]', 'link', { rel: 'apple-touch-icon', sizes: '180x180', href: './pwa/apple-touch-icon.png' })
     patch('meta[name="apple-mobile-web-app-capable"]', 'meta', { name: 'apple-mobile-web-app-capable', content: 'yes' })
     patch('meta[name="apple-mobile-web-app-title"]', 'meta', { name: 'apple-mobile-web-app-title', content: 'DeepSeek Harness' })
