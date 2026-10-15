@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { inflateSync } from 'node:zlib'
 import { test } from 'node:test'
 import { apply, inject, name } from '../index.js'
 
@@ -44,13 +45,63 @@ function dimensions(png) {
   return [png.readUInt32BE(16), png.readUInt32BE(20)]
 }
 
+function paeth(left, up, upLeft) {
+  const estimate = left + up - upLeft
+  const dl = Math.abs(estimate - left), du = Math.abs(estimate - up), dul = Math.abs(estimate - upLeft)
+  if (dl <= du && dl <= dul) return left
+  return du <= dul ? up : upLeft
+}
+
+/** Non-interlaced 8-bit RGB or RGBA. Used to check the maskable safe zone without a PNG dependency. */
+function decodePng(png) {
+  const [width, height] = dimensions(png)
+  let offset = 8
+  const chunks = []
+  let colorType
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset)
+    const type = png.subarray(offset + 4, offset + 8).toString()
+    const data = png.subarray(offset + 8, offset + 8 + length)
+    if (type === 'IHDR') { colorType = data[9]; assert.equal(data[8], 8); assert.equal(data[12], 0) }
+    else if (type === 'IDAT') chunks.push(data)
+    else if (type === 'IEND') break
+    offset += 12 + length
+  }
+  const channels = colorType === 2 ? 3 : colorType === 6 ? 4 : 0
+  assert.ok(channels, `unsupported color type ${colorType}`)
+  const raw = inflateSync(Buffer.concat(chunks))
+  const stride = width * channels
+  let cursor = 0
+  let previous = Buffer.alloc(stride)
+  const rows = []
+  for (let y = 0; y < height; y++) {
+    const filter = raw[cursor]
+    const row = Buffer.from(raw.subarray(cursor + 1, cursor + 1 + stride))
+    cursor += 1 + stride
+    if (filter === 1 || filter === 3 || filter === 4) {
+      for (let x = 0; x < stride; x++) {
+        const left = x >= channels ? row[x - channels] : 0
+        const up = previous[x]
+        const upLeft = x >= channels ? previous[x - channels] : 0
+        const predictor = filter === 1 ? left : filter === 3 ? Math.floor((left + up) / 2) : paeth(left, up, upLeft)
+        row[x] = (row[x] + predictor) & 255
+      }
+    } else if (filter === 2) {
+      for (let x = 0; x < stride; x++) row[x] = (row[x] + previous[x]) & 255
+    } else assert.equal(filter, 0)
+    previous = row
+    rows.push(row)
+  }
+  return { width, height, channels, pixel: (x, y) => rows[y].subarray(x * channels, x * channels + 3) }
+}
+
 test('exports Cordis entry and cleanly unregisters every contribution', () => {
   assert.equal(name, 'dsh-pwa')
   assert.deepEqual(inject, ['webServer'])
   const app = harness()
   assert.deepEqual([...app.routes.keys()], [
     '/manifest.webmanifest', '/pwa/apple-touch-icon.png',
-    '/pwa/icon-192.png', '/pwa/icon-512.png',
+    '/pwa/icon-192.png', '/pwa/icon-512.png', '/pwa/icon-512-maskable.png',
   ])
   assert.equal(app.handlers.has('webserver/index-inject'), true)
   app.dispose()
@@ -71,8 +122,9 @@ test('manifest uses relative paths and provides installable raster icons', async
   assert.equal(body.start_url, './')
   assert.equal(body.scope, './')
   assert.equal(body.id, undefined)
-  assert.deepEqual(body.icons.map(icon => icon.sizes), ['192x192', '512x512'])
-  assert.deepEqual(body.icons.map(icon => icon.src), ['./pwa/icon-192.png', './pwa/icon-512.png'])
+  assert.deepEqual(body.icons.map(icon => icon.sizes), ['192x192', '512x512', '512x512'])
+  assert.deepEqual(body.icons.map(icon => icon.src), ['./pwa/icon-192.png', './pwa/icon-512.png', './pwa/icon-512-maskable.png'])
+  assert.deepEqual(body.icons.map(icon => icon.purpose), ['any', 'any', 'maskable'])
   assert.equal((await call(route, 'HEAD')).body, undefined)
   assert.equal((await call(route, 'POST')).status, 405)
   app.dispose()
@@ -80,7 +132,7 @@ test('manifest uses relative paths and provides installable raster icons', async
 
 test('serves opaque PNG assets with correct dimensions', async () => {
   const app = harness()
-  for (const [name, size] of [['apple-touch-icon', 180], ['icon-192', 192], ['icon-512', 512]]) {
+  for (const [name, size] of [['apple-touch-icon', 180], ['icon-192', 192], ['icon-512', 512], ['icon-512-maskable', 512]]) {
     const route = app.routes.get(`/pwa/${name}.png`)
     const res = await call(route)
     assert.equal(res.status, 200)
@@ -93,6 +145,30 @@ test('serves opaque PNG assets with correct dimensions', async () => {
     assert.equal(head.body, undefined)
     assert.equal((await call(route, 'PUT')).status, 405)
   }
+  app.dispose()
+})
+
+test('maskable icon is a separate 512 image and its artwork stays inside the safe circle', async () => {
+  const app = harness()
+  const manifest = JSON.parse((await call(app.routes.get('/manifest.webmanifest'))).body)
+  const maskable = manifest.icons.find(icon => icon.purpose === 'maskable')
+  assert.equal(maskable.src, './pwa/icon-512-maskable.png')
+  assert.equal(maskable.sizes, '512x512')
+  const png = (await call(app.routes.get('/pwa/icon-512-maskable.png'))).body
+  const any = (await call(app.routes.get('/pwa/icon-512.png'))).body
+  assert.notEqual(Buffer.compare(png, any), 0)
+  const image = decodePng(png)
+  const radius = 0.4 * image.width
+  let content = 0
+  for (let y = 0; y < image.height; y++) {
+    for (let x = 0; x < image.width; x++) {
+      const pixel = image.pixel(x, y)
+      if (pixel[0] >= 250 && pixel[1] >= 250 && pixel[2] >= 250) continue
+      content += 1
+      assert.ok(Math.hypot(x + 0.5 - image.width / 2, y + 0.5 - image.height / 2) <= radius, `content outside the maskable safe circle at ${x},${y}`)
+    }
+  }
+  assert.ok(content > 1000)
   app.dispose()
 })
 

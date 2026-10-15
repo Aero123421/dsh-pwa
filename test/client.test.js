@@ -68,6 +68,10 @@ test('old responses after connection reset/disposal cannot mutate state or stora
   complete({ ok: true, value: { status: 'available' } }); await pending
   assert.equal(controller.state.status, 'idle'); controller.dispose()
   assert.deepEqual(Object.keys(copy.en).sort(), Object.keys(copy.ja).sort())
+  assert.match(copy.en['reason.restored'], /previous version was installed again/)
+  assert.match(copy.ja['reason.restored'], /以前の版を入れ直しました/)
+  assert.match(copy.en['reason.plugin-missing'], /may have been removed/)
+  assert.match(copy.ja['reason.plugin-missing'], /消えている可能性があります/)
 })
 
 test('Client contribution stays optional without settings, locale or connection', async () => {

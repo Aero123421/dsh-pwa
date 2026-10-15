@@ -116,22 +116,77 @@ export function checkCompatibility(packageJson, candidate, runtime) {
   return runtime
 }
 
+function savedSelection(options, previous) {
+  return {
+    source: typeof previous?.source === 'string' ? previous.source : undefined,
+    enabled: typeof previous?.enabled === 'boolean' ? previous.enabled : !!options?.enabled,
+  }
+}
+
+/** True, false, or null when listBundles cannot be trusted. Null must not start a restore. */
+async function packageInstalled(manager) {
+  if (typeof manager?.listBundles !== 'function') return null
+  try {
+    const rows = await manager.listBundles()
+    return rows.some(row => row?.name === PACKAGE && row.installed)
+  } catch { return null }
+}
+
+/**
+ * Reinstall the spec and enabled state saved before removeBundle.
+ * Used only when the replacement failed or was cancelled and this package is absent.
+ * A listBundles failure counts as still present, so an unknown profile is left alone.
+ * The restore install uses a new requestId. If the package is still absent, restore.application is failed.
+ */
+export async function restoreIfMissing(manager, installed, saved, persist) {
+  const terminal = installed?.application === 'failed' || installed?.application === 'cancelled'
+  if (!terminal || installed?.error?.code === 'already-installed') return installed
+  if (await packageInstalled(manager) !== false) return installed
+  if (typeof persist === 'function') await persist(installed).catch(() => {})
+  if (!saved?.source || typeof manager.installBundle !== 'function') return { ...installed, restore: { application: 'failed' } }
+  let restored
+  try {
+    restored = await manager.installBundle(saved.source, { enabled: saved.enabled, requestId: randomUUID(), saveExact: true })
+  } catch { restored = undefined }
+  if (await packageInstalled(manager) === true) {
+    const application = restored?.application === 'restart-required' ? 'restart-required' : 'applied'
+    return { ...installed, restore: { application, version: restored?.version } }
+  }
+  return { ...installed, restore: { application: 'failed' } }
+}
+
+async function replaceOrRestore(manager, spec, options, saved, persist) {
+  try {
+    const replaced = await manager.installBundle(spec, options)
+    return restoreIfMissing(manager, replaced, saved, persist)
+  } catch (error) {
+    const failed = { changed: false, application: 'failed', stage: 'install', target: PACKAGE, bundle: PACKAGE, error: { code: 'operation-error' } }
+    const outcome = await restoreIfMissing(manager, failed, saved, persist)
+    if (outcome.restore) return outcome
+    throw error
+  }
+}
+
 /**
  * Install a spec that may already be installed.
  * A different git ref still installs on DSH 0.2.1-alpha.3, so try installBundle first and leave this plugin loaded.
  * already-installed is returned before pnpm when the spec names the saved dependency (HMR on).
  * The official Web update then calls removeBundle and installBundle from ui-plugin-manager, which stays loaded.
  * stop-profile means the bundle is still installed, so the same installBundle runs over it.
- * Both calls here use the plugin manager service: with HMR, removeBundle stops this plugin before it returns,
+ * Any other removal failure leaves the package in place.
+ * Both calls use the plugin manager service: with HMR, removeBundle stops this plugin before it returns,
  * and that service still accepts the installBundle that follows.
+ * previous.source and previous.enabled are the installed spec before removal.
+ * If the later install fails and this package is gone, restoreIfMissing puts that spec back.
  */
-export async function installBundleUpdating(manager, spec, options) {
+export async function installBundleUpdating(manager, spec, options, previous) {
   const installed = await manager.installBundle(spec, options)
   if (installed?.error?.code !== 'already-installed' || typeof manager.removeBundle !== 'function') return installed
+  const saved = savedSelection(options, previous)
   const removed = await manager.removeBundle(PACKAGE)
-  if (removed?.error?.code === 'stop-profile') return manager.installBundle(spec, options)
+  if (removed?.error?.code === 'stop-profile') return replaceOrRestore(manager, spec, options, saved, previous?.persist)
   if (removed?.application !== 'applied' && removed?.application !== 'restart-required') return removed ?? installed
-  return manager.installBundle(spec, options)
+  return replaceOrRestore(manager, spec, options, saved, previous?.persist)
 }
 function safeResult(result) {
   if (!result) return null
@@ -199,7 +254,7 @@ export class PluginUpdates {
       const bytes = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/${file}`, 256 * 1024, options)
       if (!bytes.length || (file === 'cordis.patch.yml' && (!bytes.toString().includes('id: dsh-pwa') || !bytes.toString().includes('name: dsh-pwa')))) throw new Error('metadata')
     }
-    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
+    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-512-maskable.png', 512]]) {
       const png = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/assets/${file}`, 512 * 1024, options)
       if (png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw new Error('metadata')
     }
@@ -265,11 +320,25 @@ export class PluginUpdates {
       if (this.closed || this.isBusy() || final.bundle.source !== before.bundle.source) throw new Error('busy')
       if (compareVersions(candidate.version, final.bundle.version) <= 0) throw new Error('stale-candidate')
       managerInvoked = true
-      const result = await installBundleUpdating(final.manager, spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true })
+      const result = await installBundleUpdating(final.manager, spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true }, {
+        source: final.bundle.source, enabled: final.bundle.enabled,
+        persist: async failed => {
+          operation.result = safeResult(failed)
+          operation.status = failed?.application === 'cancelled' ? 'cancelled' : 'failed'
+          await this.save(operation)
+        },
+      })
       operation.result = safeResult(result)
+      if (result?.restore?.application === 'failed') operation.reason = 'plugin-missing'
+      else if (result?.restore?.application === 'applied' || result?.restore?.application === 'restart-required') operation.reason = 'restored'
       const installed = (await final.manager.listBundles()).find(bundle => bundle.name === PACKAGE)
       operation.status = resultState(result, operation.version, this.version, installed)
-    } catch (error) { operation.status = managerInvoked ? 'unknown' : 'failed'; operation.reason = reasonOf(error) }
+    } catch (error) {
+      if (operation.reason !== 'restored' && operation.reason !== 'plugin-missing') {
+        operation.status = managerInvoked ? 'unknown' : 'failed'
+        operation.reason = reasonOf(error)
+      } else if (operation.status === 'installing' || operation.status === 'preparing') operation.status = 'failed'
+    }
     try { await this.save(operation) } catch { /* Manager retains its running operation; reconcile still checks it. */ }
   }
   async reconcile(requestId) {

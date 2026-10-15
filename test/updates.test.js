@@ -101,7 +101,7 @@ test('missing manager/read-only/source reject before networking and an ongoing o
   await assert.rejects(busy.updater.begin('7', randomUUID(), busy.updater.base().profileKey), /busy/)
 })
 test('tag manifest and required icon/client/patch files are validated before manager', async t => {
-  for (const badFile of ['package.json', 'client.js', 'cordis.patch.yml', 'icon-512.png']) {
+  for (const badFile of ['package.json', 'client.js', 'cordis.patch.yml', 'icon-512.png', 'icon-512-maskable.png']) {
     const h = await fixture(t, { fetcher: async url => String(url).endsWith(badFile) ? new Response(badFile === 'package.json' ? JSON.stringify({ ...pkg, name: 'other-package' }) : '') : fetcher(url) })
     assert.equal((await h.updater.check()).status, 'blocked')
     assert.equal(h.calls.length, 0)
@@ -167,7 +167,7 @@ test('Release absence, API failure and no newer candidate are distinct; checks c
   const shared = await fixture(t, { fetcher: async url => { calls++; return fetcher(url) } })
   const [a, b] = await Promise.all([shared.updater.check(), shared.updater.check()])
   assert.deepEqual(a, b)
-  assert.equal(calls, 9) // metadata, manifest, four entries, three icons
+  assert.equal(calls, 10) // metadata, manifest, four entries, four icons
 })
 
 test('unknown original operation blocks any newer candidate and two profiles keep separate journals', async t => {
@@ -295,6 +295,156 @@ test('already-installed without removeBundle stays failed and does not throw', a
   const manager = { installBundle: async () => ({ application: 'failed', changed: false, error: { code: 'already-installed' } }) }
   const result = await installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, { enabled: true, saveExact: true })
   assert.equal(result.error.code, 'already-installed')
+})
+
+test('a failed install after remove restores the previous spec when the package is gone', async t => {
+  const h = await fixture(t)
+  const seen = []
+  let installs = 0
+  h.manager.installBundle = async (spec, options) => {
+    installs += 1
+    seen.push({ spec, options })
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+    if (installs === 2) {
+      h.bundle.installed = false
+      return { application: 'failed', changed: false, error: { code: 'operation-error' }, stage: 'install', target: spec, packageResult: { exitCode: 1, timedOut: false } }
+    }
+    const journal = JSON.parse(await readFile(join(h.directory, '.dsh-pwa-updates', `${id}.json`), 'utf8'))
+    assert.equal(journal.status, 'failed')
+    assert.equal(journal.result.error.code, 'operation-error')
+    assert.equal(journal.reason, undefined)
+    h.bundle.installed = true
+    h.bundle.version = '0.2.0'
+    h.bundle.source = spec
+    return { application: 'applied', changed: true, stage: 'install', target: spec, bundle: PACKAGE, version: '0.2.0' }
+  }
+  h.manager.removeBundle = async name => {
+    seen.push({ remove: name })
+    h.bundle.installed = false
+    return { application: 'applied', changed: true, stage: 'remove', target: name }
+  }
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.deepEqual(seen.map(row => row.remove ? 'remove' : 'install'), ['install', 'remove', 'install', 'install'])
+  assert.equal(seen[3].spec, `github:${REPOSITORY}`)
+  assert.equal(seen[3].options.enabled, false)
+  assert.equal(seen[3].options.saveExact, true)
+  assert.notEqual(seen[3].options.requestId, id)
+  assert.equal(h.bundle.installed, true)
+  const settled = await h.updater.reconcile(id)
+  assert.equal(settled.status, 'failed')
+  assert.equal(settled.reason, 'restored')
+  assert.equal(settled.result.error.code, 'operation-error')
+  assert.equal(settled.result.packageResult.exitCode, 1)
+  const restarted = new PluginUpdates({ manager: () => h.manager, profileDir: h.directory, version: '0.2.0', runtimeVersion: async () => '0.2.1-alpha.3' })
+  t.after(() => restarted.dispose())
+  const again = await restarted.reconcile(id)
+  assert.equal(again.status, 'failed')
+  assert.equal(again.reason, 'restored')
+})
+
+test('a failed restore reports that the plugin may have been removed', async t => {
+  const h = await fixture(t)
+  let installs = 0
+  h.manager.installBundle = async (spec, options) => {
+    installs += 1
+    h.calls.push([spec, options])
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+    if (installs === 2) {
+      h.bundle.installed = false
+      return { application: 'failed', changed: false, error: { code: 'operation-error' }, stage: 'install', target: spec }
+    }
+    return { application: 'failed', changed: false, error: { code: 'operation-error' }, stage: 'install', target: spec }
+  }
+  h.manager.removeBundle = async () => {
+    h.bundle.installed = false
+    return { application: 'applied', changed: true, stage: 'remove', target: PACKAGE }
+  }
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.equal(installs, 3)
+  assert.equal(h.calls[2][0], `github:${REPOSITORY}`)
+  assert.equal(h.calls[2][1].enabled, false)
+  assert.notEqual(h.calls[2][1].requestId, id)
+  assert.equal(h.bundle.installed, false)
+  const settled = await h.updater.reconcile(id)
+  assert.equal(settled.status, 'failed')
+  assert.equal(settled.reason, 'plugin-missing')
+  const restarted = new PluginUpdates({ manager: () => h.manager, profileDir: h.directory, version: '0.2.0', runtimeVersion: async () => '0.2.1-alpha.2' })
+  t.after(() => restarted.dispose())
+  assert.equal((await restarted.reconcile(id)).reason, 'plugin-missing')
+})
+
+test('a failed replacement that leaves the package installed does not restore it', async t => {
+  const h = await fixture(t)
+  let installs = 0
+  h.manager.installBundle = async (spec) => {
+    installs += 1
+    h.calls.push(spec)
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+    return { application: 'failed', changed: false, error: { code: 'operation-error' }, stage: 'install', target: spec }
+  }
+  h.manager.removeBundle = async () => ({ application: 'applied', changed: true, stage: 'remove', target: PACKAGE })
+  await h.updater.check()
+  const id = randomUUID()
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  await settle(h.updater)
+  assert.equal(installs, 2)
+  assert.equal(h.bundle.installed, true)
+  const settled = await h.updater.reconcile(id)
+  assert.equal(settled.status, 'failed')
+  assert.equal(settled.reason, undefined)
+})
+
+test('an install throw after removal restores only when the package is confirmed gone', async () => {
+  const previous = { source: `github:${REPOSITORY}`, enabled: true }
+  const options = { enabled: true, requestId: randomUUID(), saveExact: true }
+  let installs = 0
+  let installed = true
+  const manager = {
+    listBundles: async () => [{ name: PACKAGE, installed, version: '0.2.0', source: previous.source }],
+    removeBundle: async () => { installed = false; return { application: 'applied', changed: true, stage: 'remove', target: PACKAGE } },
+    installBundle: async (spec) => {
+      installs += 1
+      if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+      if (installs === 2) throw new Error('pnpm failed')
+      installed = true
+      return { application: 'applied', changed: true, stage: 'install', target: spec, bundle: PACKAGE, version: '0.2.0' }
+    },
+  }
+  const restored = await installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, options, previous)
+  assert.equal(restored.restore.application, 'applied')
+  assert.equal(restored.error.code, 'operation-error')
+  assert.equal(installs, 3)
+  assert.equal(installed, true)
+
+  installs = 0
+  installed = true
+  manager.installBundle = async (spec) => {
+    installs += 1
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+    throw new Error('pnpm failed')
+  }
+  manager.removeBundle = async () => ({ application: 'applied', changed: true, stage: 'remove', target: PACKAGE })
+  await assert.rejects(installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, options, previous), /pnpm failed/)
+  assert.equal(installs, 2)
+  assert.equal(installed, true)
+
+  installs = 0
+  installed = false
+  manager.listBundles = async () => { throw new Error('unavailable') }
+  manager.removeBundle = async () => ({ application: 'applied', changed: true, stage: 'remove', target: PACKAGE })
+  manager.installBundle = async (spec) => {
+    installs += 1
+    if (installs === 1) return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec }
+    throw new Error('pnpm failed')
+  }
+  await assert.rejects(installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, options, previous), /pnpm failed/)
+  assert.equal(installs, 2)
 })
 
 test('manager cancellation and override retain their terminal outcome despite package exit', () => {
