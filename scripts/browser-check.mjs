@@ -56,7 +56,7 @@ try {
               const factory = registration.factory
               registration = { ...registration, factory(require) {
                 const exports = factory(require), original = exports.apply
-                exports.apply = ctx => { window.__pwaTestContext = ctx; return original(ctx) }
+                exports.apply = ctx => { window.__pwaTestContext = ctx; window.__pwaTestExports = exports; return original(ctx) }
                 return exports
               } }
             }
@@ -107,6 +107,27 @@ try {
         assert.equal(checked.result.ok, true)
         assert.ok(['no-release', 'current', 'available'].includes(checked.result.value.status), 'published source can check stable releases')
       }
+      // Validate the browser's selected manifest, not only a manually requested URL.
+      const cdp = await context.newCDPSession(page)
+      const selected = await cdp.send('Page.getAppManifest')
+      assert.equal(new URL(selected.url).pathname, '/manifest.webmanifest')
+      assert.equal(selected.errors.filter(error => error.critical).length, 0)
+      assert.equal(JSON.parse(selected.data).short_name, 'DSH')
+      assert.equal(await page.locator('link[rel=manifest]').count(), 1)
+      assert.match(await page.locator('meta[name=viewport]').getAttribute('content'), /viewport-fit=cover/)
+      await page.locator('.dsh-pwa-install').getByText('manifestとホーム画面用アイコンを取得できました。', { exact: true }).waitFor()
+      assert.ok(await page.locator('.dsh-pwa-identity img').evaluate(async image => { await image.decode(); return image.naturalWidth === 180 }))
+      // A late enable must repair head metadata without a full document reload.
+      await page.evaluate(() => {
+        const link = document.querySelector('link[rel=manifest]'), old = link.getAttribute('href')
+        link.setAttribute('href', '/stale.webmanifest')
+        const dispose = window.__pwaTestExports.mountPwaHead()
+        if (link.getAttribute('href') !== './manifest.webmanifest') throw new Error('hot activation did not repair manifest')
+        dispose()
+        if (link.getAttribute('href') !== '/stale.webmanifest') throw new Error('head cleanup did not restore owner')
+        link.setAttribute('href', old)
+      })
+      await cdp.detach()
       const freshManifest = await (await page.request.get(`${origin}/manifest.webmanifest`)).json()
       assert.equal(freshManifest.start_url, './'); assert.equal(freshManifest.scope, './'); assert.equal(freshManifest.id, undefined)
       const maskable = freshManifest.icons.filter(icon => String(icon.purpose ?? '').split(/\s+/).includes('maskable'))
@@ -118,12 +139,17 @@ try {
         const response = await page.request.get(`${origin}/pwa/${filename}`), png = await response.body()
         assert.equal(response.status(), 200); assert.equal(png.readUInt32BE(16), size); assert.equal(png.readUInt32BE(20), size)
       }
-      for (const width of [1280, 600, 390]) {
+      for (const width of [1280, 600, 390, 360, 320]) {
         await page.setViewportSize({ width, height: 900 })
         await panel.getByRole('button', { name: '更新を確認', exact: true }).click()
         await panel.getByRole('button', { name: '更新を確認', exact: true }).waitFor()
         await page.waitForFunction(() => !document.querySelector('.dsh-pwa-updates button')?.disabled)
         assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile')), width < 768, `mobile layout follows auto mode at ${width}px`)
+        if (width < 768) {
+          const dialog = await page.getByRole('dialog').boundingBox()
+          assert.ok(dialog.x >= 0 && dialog.x + dialog.width <= width + 1, `settings fits ${width}px`)
+          assert.ok(await page.locator('.dsh-pwa-install').evaluate(el => el.scrollWidth <= el.clientWidth + 1))
+        }
         const overflow = await panel.evaluate(element => element.scrollWidth - element.clientWidth)
         assert.ok(overflow <= 1, `PWA panel overflow at ${width}px: ${overflow}`)
         await page.screenshot({ path: join(world, `pwa-${restart}-${width}-ja.png`), fullPage: false })
@@ -150,6 +176,14 @@ try {
         await menu.click()
         await page.waitForFunction(() => { const side = document.querySelector('[data-slot=root]>div>div:has(>[data-slot=sidebar])'); return side?.getBoundingClientRect().x >= -.5 })
       }
+      for (const width of [320, 360, 390]) {
+        await page.setViewportSize({ width, height: 740 })
+        const center = await page.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
+        assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - width) < 1, `single-column shell at ${width}px`)
+      }
+      await page.setViewportSize({ width: 390, height: 900 })
+      await drawer()
+      await page.keyboard.press('Escape'); await menu.waitFor()
       await drawer()
       await page.screenshot({ path: join(world, 'mobile-drawer-open.png'), animations: 'disabled' })
       await page.getByRole('button', { name: 'サイドバーを閉じる', exact: true }).click(); await menu.waitFor()
@@ -170,7 +204,7 @@ try {
       await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).waitFor()
       await page.waitForFunction(() => { const p = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]'); return p && p.getBoundingClientRect().right <= innerWidth + 1 })
       const right = await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').boundingBox()
-      assert.ok(right.width < 390 && right.x > 0, 'right drawer leaves conversation visible')
+      assert.ok(Math.abs(right.width - 390) < 1 && Math.abs(right.x) < 1, 'files use the entire phone width')
       await page.screenshot({ path: join(world, 'mobile-right-panel.png'), animations: 'disabled' })
       await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).click()
       await page.waitForFunction(() => !window.__pwaTestContext.get('sidebarRight').isExpanded())
