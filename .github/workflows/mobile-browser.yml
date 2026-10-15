@@ -5,7 +5,6 @@ on:
       - 'client.js'
       - 'index.js'
       - 'scripts/browser-check.mjs'
-      - 'scripts/mobile-*.mjs'
       - '.github/workflows/mobile-browser.yml'
   push:
     branches: ['fix/mobile-layout-and-pwa-install']
@@ -20,27 +19,28 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - run: git archive HEAD --format=tar -o /tmp/dsh-pwa-source.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: verification-source
-          path: /tmp/dsh-pwa-source.tar
-          retention-days: 1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
-      - run: npm install --global @deepseek-ai/dsh@0.2.1-alpha.3
+      - run: npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
       - run: npx playwright install --with-deps chromium
       - run: npm pack --ignore-scripts
       - run: npm run test:browser
         env:
           DSH_TELEMETRY_MODE: DISABLED
-      - name: Collect screenshots only (no authentication logs)
+      - name: Collect isolated browser evidence
         if: always()
+        shell: bash
         run: |
           mkdir -p /tmp/pwa-browser-evidence
-          find /tmp -maxdepth 2 -path '/tmp/dsh-pwa-smoke-*/*.png' -exec cp {} /tmp/pwa-browser-evidence/ \;
+          shopt -s nullglob
+          for image in /tmp/dsh-pwa-smoke-*/*.png; do cp "$image" /tmp/pwa-browser-evidence/; done
+          # This command log contains only a freshly generated fixture profile,
+          # never a running server URL or an existing user profile.
+          for log in /tmp/dsh-pwa-smoke-*/command.log; do
+            sed -E 's/(token=)[^[:space:]"&]+/\1[redacted]/g' "$log" | tail -40
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
