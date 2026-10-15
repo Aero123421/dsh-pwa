@@ -76,7 +76,21 @@ try {
       })
       const onboarding = page.getByRole('button', { name: 'Configure later', exact: true })
       if (await onboarding.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await onboarding.click()
-      await page.getByRole('button', { name: /Settings|設定/ }).first().click()
+      // The account launcher replaces the sidebar Settings button. Its accessible
+      // name is "Account menu" and the visible label is More. Settings is a
+      // menuitem in that menu, so a role=button query does not reach it.
+      async function openSettings() {
+        const direct = page.getByRole('button', { name: /^(Settings|設定|设置)$/ }).filter({ visible: true })
+        if (await direct.count()) {
+          await direct.click()
+          return
+        }
+        const trigger = page.getByRole('button', { name: /^(Account menu|账号菜单)$/ }).filter({ visible: true })
+        if (await trigger.count()) await trigger.click()
+        else await page.locator('button:visible').filter({ hasText: /^(More|更多)$/ }).click()
+        await page.getByRole('menuitem', { name: /^(Settings|設定|设置)$/ }).click()
+      }
+      await openSettings()
       await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       const panel = page.locator('.dsh-pwa-updates')
       await panel.getByText(`プラグインの実行版: ${manifest.version}`, { exact: true }).waitFor()
@@ -95,7 +109,12 @@ try {
       }
       const freshManifest = await (await page.request.get(`${origin}/manifest.webmanifest`)).json()
       assert.equal(freshManifest.start_url, './'); assert.equal(freshManifest.scope, './'); assert.equal(freshManifest.id, undefined)
-      for (const [filename, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
+      const maskable = freshManifest.icons.filter(icon => String(icon.purpose ?? '').split(/\s+/).includes('maskable'))
+      assert.deepEqual(maskable.map(icon => icon.sizes), ['192x192', '512x512'])
+      assert.deepEqual(maskable.map(icon => icon.src), ['./pwa/icon-192-maskable.png', './pwa/icon-512-maskable.png'])
+      assert.ok(freshManifest.icons.some(icon => icon.purpose === 'any' && icon.sizes === '192x192'))
+      assert.ok(freshManifest.icons.some(icon => icon.purpose === 'any' && icon.sizes === '512x512'))
+      for (const [filename, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-192-maskable.png', 192], ['icon-512-maskable.png', 512]]) {
         const response = await page.request.get(`${origin}/pwa/${filename}`), png = await response.body()
         assert.equal(response.status(), 200); assert.equal(png.readUInt32BE(16), size); assert.equal(png.readUInt32BE(20), size)
       }
@@ -120,7 +139,7 @@ try {
       await page.reload(); await page.waitForFunction(() => window.__pwaTestContext?.get('sessions')?.list.getSnapshot().phase === 'ready'); await active(false)
       assert.equal(await page.locator('.dsh-pwa-menu').count(), 0)
       await page.evaluate(() => { const locale = window.__pwaTestContext.locale; if (!locale.getSnapshot().locales.some(x => x.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }); locale.setLocale('ja') })
-      await page.getByRole('button', { name: 'Settings', exact: true }).click()
+      await openSettings()
       await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       await mobile.getByRole('button', { name: '自動', exact: true }).click(); await active(true)
       assert.ok((await panel.innerText()).includes('ホーム画面'))

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, writeFile, readFile, rename, lstat } from 'node:fs/promises'
 import { join } from 'node:path'
+import semver from 'semver'
 import manifest from './package.json' with { type: 'json' }
 
 export const REPOSITORY = 'Aero123421/dsh-pwa'
@@ -91,18 +92,125 @@ export function releaseCandidate(release, current) {
   const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes: release.body.slice(0, 6000) }
   return compareVersions(version, current) > 0 ? candidate : null
 }
-/** Compare the exact optional DSH peer declared by source releases; unknown ranges stay manual. */
+const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
+
+/** Same peer rule as DSH app-boot: prereleases match, and workspace:^, workspace:~, and workspace:* mean the running version. */
+function dshPeerMatches(runtime, range) {
+  const requirement = WORKSPACE_PEER.has(range) ? runtime : range
+  if (typeof requirement !== 'string' || requirement.trim() === '') return false
+  try { return semver.satisfies(runtime, requirement, { includePrerelease: true }) }
+  catch { return false }
+}
+
+/**
+ * Accept a candidate whose @deepseek-ai/dsh* peers the running DSH satisfies.
+ * A release with no such peer, or a non-string range, stays manual.
+ * An unsatisfied or unparsable range is incompatible: DSH would skip that bundle at boot.
+ */
 export function checkCompatibility(packageJson, candidate, runtime) {
   semanticVersion(runtime)
   if (!packageJson || packageJson.name !== PACKAGE || packageJson.version !== candidate.version || typeof packageJson.dsh?.bundle?.patch !== 'string') throw new Error('metadata')
   const peers = Object.entries(packageJson.peerDependencies ?? {}).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
   if (!peers.length || peers.some(([, range]) => typeof range !== 'string')) throw new Error('compatibility-unknown')
-  // PWA update releases declare exact DSH peers. Other ranges require review.
-  for (const [, range] of peers) {
-    try { semanticVersion(range) } catch { throw new Error('compatibility-unknown') }
-    if (range !== runtime) throw new Error('incompatible')
-  }
+  for (const [, range] of peers) if (!dshPeerMatches(runtime, range)) throw new Error('incompatible')
   return runtime
+}
+
+function savedSelection(options, previous) {
+  return {
+    source: typeof previous?.source === 'string' ? previous.source : undefined,
+    enabled: typeof previous?.enabled === 'boolean' ? previous.enabled : !!options?.enabled,
+  }
+}
+
+/** True, false, or null when listBundles cannot be trusted. Null must not start a restore. */
+async function packageInstalled(manager) {
+  if (typeof manager?.listBundles !== 'function') return null
+  try {
+    const rows = await manager.listBundles()
+    return rows.some(row => row?.name === PACKAGE && row.installed)
+  } catch { return null }
+}
+
+/**
+ * Whether resultState classifies this manager result as failed.
+ * The installed row passed here matches the result's own version, so a clean
+ * restart-required stays restart-required. Absence is checked separately.
+ * already-installed names the saved spec and is not a failed replacement.
+ * cancelled and overridden stay those states even when packageResult failed.
+ */
+function replacementFailed(result) {
+  if (!result || result.error?.code === 'already-installed') return false
+  const version = typeof result.version === 'string' ? result.version : '0.0.0'
+  return resultState(result, version, version, { installed: true, version }) === 'failed'
+}
+
+/**
+ * Reinstall the spec and enabled state saved before removeBundle.
+ * Used when resultState is failed and listBundles confirms this package is absent.
+ * That includes application failed, an error, and restart-required whose packageResult
+ * exited non-zero or timed out. A listBundles failure counts as still present.
+ * The restore install uses a new requestId. If the package is still absent, restore.application is failed.
+ */
+export async function restoreIfMissing(manager, installed, saved, persist) {
+  if (!replacementFailed(installed)) return installed
+  if (await packageInstalled(manager) !== false) return installed
+  if (typeof persist === 'function') await persist(installed).catch(() => {})
+  if (!saved?.source || typeof manager.installBundle !== 'function') return { ...installed, restore: { application: 'failed' } }
+  let restored
+  try {
+    restored = await manager.installBundle(saved.source, { enabled: saved.enabled, requestId: randomUUID(), saveExact: true })
+  } catch { restored = undefined }
+  if (await packageInstalled(manager) === true) {
+    const application = restored?.application === 'restart-required' ? 'restart-required' : 'applied'
+    return { ...installed, restore: { application, version: restored?.version } }
+  }
+  return { ...installed, restore: { application: 'failed' } }
+}
+
+async function replaceOrRestore(manager, spec, options, saved, persist) {
+  try {
+    const replaced = await manager.installBundle(spec, options)
+    return restoreIfMissing(manager, replaced, saved, persist)
+  } catch (error) {
+    const failed = { changed: false, application: 'failed', stage: 'install', target: PACKAGE, bundle: PACKAGE, error: { code: 'operation-error' } }
+    const outcome = await restoreIfMissing(manager, failed, saved, persist)
+    if (outcome.restore) return outcome
+    throw error
+  }
+}
+
+/**
+ * Install a spec that may already be installed.
+ * A different git ref still installs on DSH 0.2.1-alpha.3, so try installBundle first and leave this plugin loaded.
+ * already-installed is returned before pnpm when the spec names the saved dependency (HMR on).
+ * The official Web update then calls removeBundle and installBundle from ui-plugin-manager, which stays loaded.
+ * stop-profile means the bundle is still installed, so the same installBundle runs over it.
+ * Any other removal failure leaves the package in place.
+ * Both calls use the plugin manager service: with HMR, removeBundle stops this plugin before it returns,
+ * and that service still accepts the installBundle that follows.
+ * previous.source and previous.enabled are the installed spec before removal.
+ * If the later install's resultState is failed and this package is gone, restoreIfMissing puts that spec back.
+ * If removeBundle throws, the same restore runs only when the list confirms the package is absent.
+ * A thrown removal that leaves the package listed, or a listBundles failure, is rethrown.
+ */
+export async function installBundleUpdating(manager, spec, options, previous) {
+  const installed = await manager.installBundle(spec, options)
+  if (installed?.error?.code !== 'already-installed' || typeof manager.removeBundle !== 'function') return installed
+  const saved = savedSelection(options, previous)
+  const persist = previous?.persist
+  let removed
+  try {
+    removed = await manager.removeBundle(PACKAGE)
+  } catch (error) {
+    const failed = { changed: false, application: 'failed', stage: 'remove', target: PACKAGE, bundle: PACKAGE, error: { code: 'operation-error' } }
+    const outcome = await restoreIfMissing(manager, failed, saved, persist)
+    if (outcome.restore) return outcome
+    throw error
+  }
+  if (removed?.error?.code === 'stop-profile') return replaceOrRestore(manager, spec, options, saved, persist)
+  if (removed?.application !== 'applied' && removed?.application !== 'restart-required') return removed ?? installed
+  return replaceOrRestore(manager, spec, options, saved, persist)
 }
 function safeResult(result) {
   if (!result) return null
@@ -170,7 +278,7 @@ export class PluginUpdates {
       const bytes = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/${file}`, 256 * 1024, options)
       if (!bytes.length || (file === 'cordis.patch.yml' && (!bytes.toString().includes('id: dsh-pwa') || !bytes.toString().includes('name: dsh-pwa')))) throw new Error('metadata')
     }
-    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
+    for (const [file, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512], ['icon-192-maskable.png', 192], ['icon-512-maskable.png', 512]]) {
       const png = await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/assets/${file}`, 512 * 1024, options)
       if (png.length < 24 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw new Error('metadata')
     }
@@ -236,11 +344,25 @@ export class PluginUpdates {
       if (this.closed || this.isBusy() || final.bundle.source !== before.bundle.source) throw new Error('busy')
       if (compareVersions(candidate.version, final.bundle.version) <= 0) throw new Error('stale-candidate')
       managerInvoked = true
-      const result = await final.manager.installBundle(spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true })
+      const result = await installBundleUpdating(final.manager, spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true }, {
+        source: final.bundle.source, enabled: final.bundle.enabled,
+        persist: async failed => {
+          operation.result = safeResult(failed)
+          operation.status = failed?.application === 'cancelled' ? 'cancelled' : 'failed'
+          await this.save(operation)
+        },
+      })
       operation.result = safeResult(result)
+      if (result?.restore?.application === 'failed') operation.reason = 'plugin-missing'
+      else if (result?.restore?.application === 'applied' || result?.restore?.application === 'restart-required') operation.reason = 'restored'
       const installed = (await final.manager.listBundles()).find(bundle => bundle.name === PACKAGE)
       operation.status = resultState(result, operation.version, this.version, installed)
-    } catch (error) { operation.status = managerInvoked ? 'unknown' : 'failed'; operation.reason = reasonOf(error) }
+    } catch (error) {
+      if (operation.reason !== 'restored' && operation.reason !== 'plugin-missing') {
+        operation.status = managerInvoked ? 'unknown' : 'failed'
+        operation.reason = reasonOf(error)
+      } else if (operation.status === 'installing' || operation.status === 'preparing') operation.status = 'failed'
+    }
     try { await this.save(operation) } catch { /* Manager retains its running operation; reconcile still checks it. */ }
   }
   async reconcile(requestId) {

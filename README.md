@@ -9,17 +9,17 @@ The settings page is shown as **PWA & Mobile**. The package, bundle and plugin I
 ## Features
 
 - Home-screen icon for Safari on iOS/iPadOS (opaque 180×180 PNG)
-- PWA icons in 192×192 and 512×512 PNG sizes
+- PWA icons in 192×192 and 512×512 PNG sizes, plus separate maskable icons at both sizes with the artwork inside the center safe zone
 - `DeepSeek Harness` app name, `DSH` short name, and `standalone` display mode
 - Relative URLs for correct PWA identity on supported proxy subpaths
-- No service worker, build step, external server, credentials, or additional runtime dependencies
+- No service worker, build step, external server, or credentials. The updater depends on `semver` for the same prerelease-inclusive peer check DSH uses
 - Uses official Cordis WebServer hooks; leaves DSH files untouched
 - Optional PWA settings page with English/Japanese update controls and a profile-owned installation journal
 - Mobile layout switch (Auto / On / Off) on the same settings page: a slide-out sidebar drawer, a floating menu button and full-width conversation on phones
 
 ## Installation
 
-Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject` (developed against the upstream `0.2.1-alpha.2` API).
+Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The mobile layout was checked against the 0.2.1-alpha.2 DOM.
 
 Install directly from GitHub into the **web** profile:
 
@@ -102,11 +102,15 @@ Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the offi
 
 The PWA page in Settings shows the running plugin version. Checking is separate from installing. It distinguishes no published Release, no newer stable version, API failure, unsupported DSH, installation failure, restart required, and confirmed running version. The page uses DSH's shared React and native Button; no build or prepare step is added.
 
-Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and three PNG files are checked under the exact tag before installation. The updater's optional DSH peer is `0.2.1-alpha.2`; existing static PWA features do not require updater services.
+Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and five PNG files (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-192-maskable.png`, `icon-512-maskable.png`) are checked under the exact tag before installation. Its `@deepseek-ai/dsh*` peers must satisfy the running DSH version under the same rule as app-boot (`includePrerelease`). A release with no such peer stays manual. Static PWA routes do not require the updater.
+
+On DSH 0.2.1-alpha.3 with HMR, `installBundle` of a spec that names the saved dependency fails with `already-installed` before pnpm runs. A different git ref still installs. When the result is `already-installed`, this updater follows the official Plugins update: `removeBundle`, then `installBundle`, keeping the previous enabled selection and `saveExact`. If removal returns `stop-profile`, the bundle is still installed and `installBundle` runs over it. Any other removal failure leaves the package in place. The calls use the plugin manager service. With HMR, `removeBundle` stops this plugin before it returns; that service still accepts the following `installBundle`. The official update does the same pair from the plugin manager page, which stays loaded.
+
+Before `removeBundle`, the updater keeps the installed spec and enabled state. After removal, it installs that spec again with a new request id when `resultState` is `failed` and `listBundles` shows this package is absent. `resultState` is `failed` for an install error, for `application: failed`, and for `restart-required` when `packageResult` exited non-zero or timed out. `cancelled` and `overridden` stay those outcomes. If `removeBundle` throws, the same restore runs only when the list confirms the package is absent. The original update stays failed. When the previous version is back, the settings page says so and asks for a DSH restart if the plugin does not return. When that restore fails too, the page says the plugin may have been removed and to install it again from GitHub Releases. A `listBundles` failure is treated as still installed, so the updater does not put a second copy on an unknown profile.
 
 Operation IDs are saved before the first request. The Host stores only update metadata/results under the current profile's `.dsh-pwa-updates/`, so reconnecting browsers and replacement plugin instances reconcile the original operation. An unknown result is never automatically resubmitted. Disabled bundle selection is preserved, and an installed newer version is never downgraded by the updater.
 
-Plugin updates do not change manifest identity, `start_url`, `scope`, or icon URLs. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language.
+Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The any-purpose icons stay at `./pwa/icon-192.png` and `./pwa/icon-512.png`. The manifest also publishes `./pwa/icon-192-maskable.png` and `./pwa/icon-512-maskable.png` for Android adaptive icons. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language.
 
 [Current release notes](docs/release-0.3.0.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
 
@@ -115,11 +119,14 @@ Plugin updates do not change manifest identity, `start_url`, `scope`, or icon UR
 ```bash
 npm ci
 npm test
+npm run check:dsh-peer
 npm pack --ignore-scripts
 npm run test:browser
 ```
 
-Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, and cleanup. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the 767/768px automatic boundary, saved modes, drawer opening/closing and reselection, files, composer text size, light/dark appearance, reduced motion, desktop recovery, and the unchanged manifest/icons. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
+`npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
+
+Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, and the maskable icon safe zone. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the 767/768px automatic boundary, saved modes, drawer opening/closing and reselection, files, composer text size, light/dark appearance, reduced motion, desktop recovery, and the manifest icons including the maskable 192 and 512 icons. The smoke clicks a visible Settings button when the sidebar has one. DSH 0.2.1-alpha.2 still shows that button. On 0.2.1-alpha.3 the account control is labeled More, its accessible name is Account menu, and Settings is a menu item; the smoke opens that menu. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
 
 ## License
 

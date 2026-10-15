@@ -18,6 +18,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'mobile.hint': 'Auto uses the mobile layout on screens narrower than 768px. The choice is saved in this browser only.', 'mobile.active': 'Mobile layout is on in this browser.', 'mobile.inactive': 'Mobile layout is off in this browser.',
       'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.closePanel': 'Close panel',
       'reason.release-unavailable': 'No published update release is available.', 'reason.storage': 'The profile update record could not be saved.', 'reason.interrupted': 'Preparation was interrupted before installation. Check again.', 'reason.network': 'The release service or DSH connection could not be reached.',
+      'reason.restored': 'The new version did not install. The previous version was installed again. Restart DSH if the plugin does not come back.',
+      'reason.plugin-missing': 'The new version did not install, and the previous version could not be put back. The plugin may have been removed. Install it again from GitHub Releases.',
     },
     ja: {
       title: 'PWA・モバイル', updates: 'プラグインの更新', version: 'プラグインの実行版', installed: '導入済みの版', check: '更新を確認', install: 'プラグインを更新', reconcile: '結果を確認', manual: 'GitHub Releases から手動更新',
@@ -33,6 +35,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'mobile.hint': '自動では幅 768px 未満の画面でモバイル表示にします。設定はこのブラウザにだけ保存されます。', 'mobile.active': 'このブラウザではモバイル表示がオンです。', 'mobile.inactive': 'このブラウザではモバイル表示がオフです。',
       'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.closePanel': 'パネルを閉じる',
       'reason.release-unavailable': '公開された更新版を取得できません。', 'reason.storage': 'profile の更新記録を保存できませんでした。', 'reason.interrupted': '導入前の準備が中断されました。再確認してください。', 'reason.network': '配布サービスまたは DSH と通信できませんでした。',
+      'reason.restored': '新しい版は導入できませんでした。以前の版を入れ直しました。プラグインが戻らない場合は DSH を再起動してください。',
+      'reason.plugin-missing': '新しい版は導入できず、以前の版も入れ直せませんでした。プラグインが消えている可能性があります。GitHub Releases から入れ直してください。',
     },
   }
   class UpdateController {
