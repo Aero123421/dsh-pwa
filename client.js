@@ -5,6 +5,13 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   const h = React.createElement, NS = 'dsh.pwa'
   const copy = {
     en: {
+      'pwa.title': 'Add to Home Screen', 'pwa.install': 'Install app', 'pwa.check': 'Check PWA setup',
+      'pwa.idle': 'Check the app icon and installation metadata.', 'pwa.checking': 'Checking the manifest and icons…',
+      'pwa.ready': 'The manifest and home-screen icons are available.', 'pwa.failed': 'The PWA manifest or icons could not be verified. Enable this plugin in the Web profile, restart DSH and reload this page; then check the proxy paths.',
+      'pwa.insecure': 'Installation requires HTTPS (or localhost). Open the HTTPS address of this DSH server.',
+      'pwa.installed': 'The home-screen app is installed.', 'pwa.ios': 'In Safari, use Share → Add to Home Screen. Open this page in Safari rather than an in-app browser.',
+      'pwa.manual': 'Use the browser menu → Install app / Add to Home Screen. The install button appears here when the browser offers it.',
+      'pwa.accepted': 'Installation was accepted. Finish any browser confirmation.', 'pwa.dismissed': 'Installation was cancelled. You can try again from the browser menu.',
       title: 'PWA & Mobile', updates: 'Plugin updates', version: 'Running plugin version', installed: 'Installed plugin version', check: 'Check for updates', install: 'Update plugin', reconcile: 'Check result', manual: 'Manual update on GitHub Releases',
       hint: 'If the home-screen icon stays outdated, remove it and add it again.',
       idle: 'Check for a versioned plugin release.', checking: 'Checking for updates…', current: 'No newer stable release.', 'no-release': 'No published update release yet.',
@@ -16,12 +23,19 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.busy': 'Another update is in progress.', 'reason.redirect': 'A download redirected outside the approved repository.', 'reason.size': 'Release data exceeded the download limit.', 'reason.stale-candidate': 'The candidate or installed bundle changed. Check again.',
       'mobile.title': 'Mobile layout', 'mobile.auto': 'Auto', 'mobile.on': 'On', 'mobile.off': 'Off',
       'mobile.hint': 'Auto uses the mobile layout on screens narrower than 768px. The choice is saved in this browser only.', 'mobile.active': 'Mobile layout is on in this browser.', 'mobile.inactive': 'Mobile layout is off in this browser.',
-      'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.closePanel': 'Close panel',
+      'mobile.dismiss': 'Dismiss sidebar backdrop', 'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.closePanel': 'Close panel',
       'reason.release-unavailable': 'No published update release is available.', 'reason.storage': 'The profile update record could not be saved.', 'reason.interrupted': 'Preparation was interrupted before installation. Check again.', 'reason.network': 'The release service or DSH connection could not be reached.',
       'reason.restored': 'The new version did not install. The previous version was installed again. Restart DSH if the plugin does not come back.',
       'reason.plugin-missing': 'The new version did not install, and the previous version could not be put back. The plugin may have been removed. Install it again from GitHub Releases.',
     },
     ja: {
+      'pwa.title': 'ホーム画面に追加', 'pwa.install': 'アプリをインストール', 'pwa.check': 'PWAの設定を確認',
+      'pwa.idle': 'アプリアイコンとインストール情報を確認します。', 'pwa.checking': 'manifestとアイコンを確認しています…',
+      'pwa.ready': 'manifestとホーム画面用アイコンを取得できました。', 'pwa.failed': 'manifestまたはアイコンを確認できません。Webプロファイルでこのプラグインを有効にし、DSHを再起動してページを再読み込みしてください。プロキシのパス設定も確認してください。',
+      'pwa.insecure': 'インストールにはHTTPS（またはlocalhost）が必要です。このDSHサーバーのHTTPSアドレスで開いてください。',
+      'pwa.installed': 'ホーム画面アプリを追加済みです。', 'pwa.ios': 'Safariの「共有」→「ホーム画面に追加」で追加できます。アプリ内ブラウザではなくSafariで開いてください。',
+      'pwa.manual': 'ブラウザのメニューから「アプリをインストール」または「ホーム画面に追加」を選んでください。ブラウザが対応する場合は、ここにもインストールボタンが表示されます。',
+      'pwa.accepted': 'インストール操作を受け付けました。ブラウザ側に確認が表示された場合は完了してください。', 'pwa.dismissed': 'インストールをキャンセルしました。ブラウザのメニューから再実行できます。',
       title: 'PWA・モバイル', updates: 'プラグインの更新', version: 'プラグインの実行版', installed: '導入済みの版', check: '更新を確認', install: 'プラグインを更新', reconcile: '結果を確認', manual: 'GitHub Releases から手動更新',
       hint: 'ホーム画面のアイコンが古い場合は、追加し直してください。',
       idle: '版付きのプラグイン配布を確認できます。', checking: '更新を確認しています…', current: '新しい正式版はありません。', 'no-release': '公開された更新版がありません。',
@@ -33,11 +47,122 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.busy': '別の更新が進行中です。', 'reason.redirect': '許可していない取得先への転送を拒否しました。', 'reason.size': '配布情報が取得サイズ上限を超えました。', 'reason.stale-candidate': '候補または導入済み bundle が変わりました。再確認してください。',
       'mobile.title': 'モバイル表示', 'mobile.auto': '自動', 'mobile.on': 'オン', 'mobile.off': 'オフ',
       'mobile.hint': '自動では幅 768px 未満の画面でモバイル表示にします。設定はこのブラウザにだけ保存されます。', 'mobile.active': 'このブラウザではモバイル表示がオンです。', 'mobile.inactive': 'このブラウザではモバイル表示がオフです。',
-      'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.closePanel': 'パネルを閉じる',
+      'mobile.dismiss': 'サイドバーの背景を閉じる', 'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.closePanel': 'パネルを閉じる',
       'reason.release-unavailable': '公開された更新版を取得できません。', 'reason.storage': 'profile の更新記録を保存できませんでした。', 'reason.interrupted': '導入前の準備が中断されました。再確認してください。', 'reason.network': '配布サービスまたは DSH と通信できませんでした。',
       'reason.restored': '新しい版は導入できませんでした。以前の版を入れ直しました。プラグインが戻らない場合は DSH を再起動してください。',
       'reason.plugin-missing': '新しい版は導入できず、以前の版も入れ直せませんでした。プラグインが消えている可能性があります。GitHub Releases から入れ直してください。',
     },
+  }
+  /** Mirror server metadata on hot plugin activation. Restore only our writes. */
+  function mountPwaHead(doc = document) {
+    const cleanup = []
+    const patch = (selector, tag, attributes) => {
+      const matches = [...doc.head.querySelectorAll(selector)]
+      const nodes = matches.length ? matches : [doc.createElement(tag)]
+      for (const node of nodes) {
+        const fresh = !node.parentNode
+        const before = Object.fromEntries(Object.keys(attributes).map(key => [key, node.getAttribute(key)]))
+        for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value)
+        if (fresh) doc.head.append(node)
+        cleanup.push(() => {
+          if (fresh) { node.remove(); return }
+          for (const [key, value] of Object.entries(attributes)) {
+            if (node.getAttribute(key) !== value) continue
+            if (before[key] === null) node.removeAttribute(key)
+            else node.setAttribute(key, before[key])
+          }
+        })
+      }
+    }
+    patch('link[rel="manifest"]', 'link', { rel: 'manifest', href: './manifest.webmanifest', crossorigin: 'use-credentials' })
+    patch('link[rel="apple-touch-icon"]', 'link', { rel: 'apple-touch-icon', sizes: '180x180', href: './pwa/apple-touch-icon.png' })
+    patch('meta[name="apple-mobile-web-app-capable"]', 'meta', { name: 'apple-mobile-web-app-capable', content: 'yes' })
+    patch('meta[name="apple-mobile-web-app-title"]', 'meta', { name: 'apple-mobile-web-app-title', content: 'DeepSeek Harness' })
+    // Preserve zoom/accessibility directives from the host instead of replacing them.
+    const viewport = doc.head.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? 'width=device-width, initial-scale=1'
+    const cover = viewport.replace(/,?\s*viewport-fit\s*=\s*[^,]+/gi, '') + ', viewport-fit=cover'
+    patch('meta[name="viewport"]', 'meta', { name: 'viewport', content: cover })
+    return () => { for (const dispose of cleanup.reverse()) dispose() }
+  }
+  class InstallController {
+    constructor(target = window) {
+      this.target = target; this.listeners = new Set(); this.closed = false
+      this.display = target.matchMedia?.('(display-mode: standalone)')
+      const ua = target.navigator?.userAgent ?? ''
+      const ios = /iPad|iPhone|iPod/.test(ua) || (target.navigator?.platform === 'MacIntel' && target.navigator.maxTouchPoints > 1)
+      this.state = { secure: !!target.isSecureContext, installed: !!(this.display?.matches || target.navigator?.standalone), ios, prompt: false, check: 'idle', outcome: null }
+      this.onPrompt = event => { event.preventDefault(); this.deferred = event; this.publish({ prompt: true, outcome: null }) }
+      this.onInstalled = () => { this.deferred = null; this.publish({ installed: true, prompt: false, outcome: null }) }
+      this.onDisplay = () => this.publish({ installed: !!(this.display?.matches || target.navigator?.standalone) })
+      target.addEventListener('beforeinstallprompt', this.onPrompt)
+      target.addEventListener('appinstalled', this.onInstalled)
+      this.display?.addEventListener('change', this.onDisplay)
+    }
+    getSnapshot = () => this.state
+    subscribe = listener => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+    publish(value) { if (this.closed) return; this.state = { ...this.state, ...value }; for (const fn of this.listeners) fn() }
+    async install() {
+      const event = this.deferred
+      if (this.closed || !event) return
+      this.deferred = null; this.publish({ prompt: false })
+      try {
+        await event.prompt() // Invoked in the button's user-activation task.
+        const choice = await event.userChoice
+        if (!this.state.installed) this.publish({ outcome: choice.outcome === 'accepted' ? 'accepted' : 'dismissed' })
+      } catch { this.publish({ outcome: 'failed' }) }
+    }
+    async check() {
+      if (this.closed || this.state.check === 'checking') return
+      this.request?.abort(); const request = new AbortController(); this.request = request
+      this.publish({ check: 'checking' })
+      try {
+        const base = new URL('./', this.target.document.baseURI)
+        const manifestUrl = new URL('./manifest.webmanifest', base)
+        const get = async (url, type) => {
+          if (url.origin !== base.origin || !url.pathname.startsWith(base.pathname)) throw new Error('foreign metadata')
+          const response = await this.target.fetch(url.href, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: request.signal })
+          if (!response.ok || !response.headers.get('content-type')?.includes(type)) throw new Error('unavailable metadata')
+          return response
+        }
+        const response = await get(manifestUrl, 'application/manifest+json')
+        const data = await response.json()
+        const start = new URL(data.start_url, manifestUrl), scope = new URL(data.scope, manifestUrl)
+        if (!data.name || data.display !== 'standalone' || start.href !== base.href || scope.href !== base.href) throw new Error('invalid manifest')
+        const images = [{ src: './pwa/apple-touch-icon.png', size: 180 }]
+        for (const size of [192, 512]) {
+          const image = data.icons?.find(icon => icon.sizes === `${size}x${size}` && (!icon.purpose || icon.purpose.split(/\s+/).includes('any')))
+          if (!image) throw new Error('missing icon')
+          images.push({ ...image, size })
+        }
+        await Promise.all(images.map(async image => {
+          const response = await get(new URL(image.src, manifestUrl), 'image/png')
+          const bytes = new Uint8Array(await response.arrayBuffer())
+          if (bytes.length < 24 || bytes.length > 1024 * 1024 || bytes.slice(0, 8).join(',') !== '137,80,78,71,13,10,26,10') throw new Error('invalid icon')
+          const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+          if (view.getUint32(16) !== image.size || view.getUint32(20) !== image.size) throw new Error('invalid icon size')
+        }))
+        if (!request.signal.aborted) this.publish({ check: 'ready' })
+      } catch { if (!request.signal.aborted) this.publish({ check: 'failed' }) }
+    }
+    dispose() {
+      this.closed = true; this.deferred = null; this.request?.abort(); this.listeners.clear()
+      this.target.removeEventListener('beforeinstallprompt', this.onPrompt)
+      this.target.removeEventListener('appinstalled', this.onInstalled)
+      this.display?.removeEventListener('change', this.onDisplay)
+    }
+  }
+  function InstallUI({ install, locale }) {
+    const state = React.useSyncExternalStore(install.subscribe, install.getSnapshot), t = locale.bind(NS)
+    React.useEffect(() => { void install.check() }, [install])
+    const status = state.installed ? 'installed' : !state.secure ? 'insecure' : state.check
+    return h('div', { className: 'dsh-pwa-install' },
+      h('div', { className: 'dsh-pwa-identity' }, h('img', { src: './pwa/apple-touch-icon.png', width: 56, height: 56, alt: '' }), h('h4', null, t('pwa.title'))),
+      h('p', { role: status === 'failed' || status === 'insecure' ? 'alert' : 'status' }, t(`pwa.${status}`)),
+      !state.installed && h('p', { className: 'dsh-pwa-muted' }, t(state.ios ? 'pwa.ios' : 'pwa.manual')),
+      state.outcome && h('p', { role: 'status' }, t(`pwa.${state.outcome}`)),
+      h('div', { className: 'dsh-pwa-actions' },
+        state.prompt && !state.installed && state.secure && h(Button, { variant: 'primary', onClick: () => { void install.install() } }, t('pwa.install')),
+        h(Button, { variant: 'outline', disabled: state.check === 'checking', onClick: () => { void install.check() } }, t('pwa.check'))))
   }
   class UpdateController {
     constructor(connection, storage) {
@@ -112,6 +237,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       let mode
       try { mode = storage?.getItem(MODE_KEY) } catch {}
       this.query = (matchMedia ?? globalThis.matchMedia)?.(NARROW)
+      this.viewport = globalThis.visualViewport
+      this.onViewport = () => {
+        if (!this.state?.active || (this.viewport?.scale ?? 1) !== 1) return
+        this.root?.style?.setProperty('--dsh-pwa-viewport', `${Math.round(this.viewport?.height ?? globalThis.innerHeight)}px`)
+      }
+      this.viewport?.addEventListener('resize', this.onViewport)
       this.onChange = () => this.update()
       this.query?.addEventListener?.('change', this.onChange)
       this.state = { mode: MODES.includes(mode) ? mode : 'auto', active: false }
@@ -127,92 +258,121 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     update(mode = this.state.mode) {
       const active = mode === 'on' || (mode === 'auto' && !!this.query?.matches)
       this.root?.toggleAttribute?.('data-dsh-mobile', active)
+      if (!active) this.root?.style?.removeProperty('--dsh-pwa-viewport')
       if (mode === this.state.mode && active === this.state.active) return
-      this.state = { mode, active }
+      this.state = { mode, active }; this.onViewport()
       for (const listener of this.listeners) listener()
     }
-    dispose() { this.query?.removeEventListener?.('change', this.onChange); this.root?.removeAttribute?.('data-dsh-mobile'); this.listeners.clear() }
+    dispose() { this.viewport?.removeEventListener('resize', this.onViewport); this.root?.style?.removeProperty('--dsh-pwa-viewport'); this.query?.removeEventListener?.('change', this.onChange); this.root?.removeAttribute?.('data-dsh-mobile'); this.listeners.clear() }
   }
-  // DSH layout hooks without hashed class names: frame data attributes, slot markers and :has().
+  // Internal DOM seam: official ui-layout at 5719020 (0.2.1-alpha.3).
+  // There is no public mobile-presentation API. Keep state in ctx.layout and
+  // style only stable slot/data markers; never copy or replace the DSH shell.
   const FRAME = '[data-slot=root] > div', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
-  const EASE = '.28s cubic-bezier(.2,.8,.2,1)'
-  const mobileCss = [
-    `${M}{--dsh-pwa-drawer:min(84vw,320px);--dsh-pwa-panel:min(88vw,440px);-webkit-tap-highlight-color:transparent}`,
-    `${M} body{overscroll-behavior:none}`,
-    `${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:1/span 2!important;grid-row:1;transition:transform ${EASE},border-radius ${EASE}}`,
-    `${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;inset:0 auto 0 0;z-index:30;width:var(--dsh-pwa-drawer);box-sizing:border-box;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform ${EASE},visibility 0s linear .28s}`,
-    `${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s}`,
-    `${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=main]){transform:translateX(var(--dsh-pwa-drawer));border-radius:24px 0 0 24px;overflow:hidden}`,
-    `${M} [data-slot=sidebar]>div{width:100%!important}`,
-    // The right panel (files, terminal…) opens fullscreen on narrow frames; present it as a drawer from the right instead.
-    `${M} ${FRAME}[data-rightbar-fullscreen]>div:has(>[data-slot=main]){transform:translateX(calc(-1 * var(--dsh-pwa-panel)));border-radius:0 24px 24px 0;overflow:hidden}`,
-    `${M} [data-sidebar-right-panel=fullscreen]{left:auto!important;width:var(--dsh-pwa-panel)!important;max-width:none!important;--dsh-sidebar-width:var(--dsh-pwa-panel)!important;padding-top:env(safe-area-inset-top);box-sizing:border-box}`,
-    `${M} [data-sidebar-right-panel=fullscreen][data-sidebar-right-open]{box-shadow:-8px 0 24px #0000001f;animation:dsh-pwa-panel-in ${EASE}}`,
-    `@keyframes dsh-pwa-panel-in{from{transform:translateX(100%)}}`,
-    `${M} ${FRAME}>div[data-side]{display:none!important}`,
-    `${M} [data-slot="conversation.header"]>header{padding-left:calc(env(safe-area-inset-left) + 64px)}`,
-    `${M} [data-composer-seat]{padding-bottom:env(safe-area-inset-bottom)}`,
-    `${M} [data-composer-input],${M} input,${M} textarea{font-size:max(16px,1em)}`,
-    // DSH Settings is a two-column dialog; on a phone its navigation becomes a scrolling row above the page.
-    `${M} [data-shortcut-modal=settings]{flex-direction:column!important}`,
-    `${M} [data-shortcut-modal=settings]>nav{width:auto!important;flex:none!important;max-width:none!important;padding-bottom:0!important;border:0!important}`,
-    `${M} [data-shortcut-modal=settings]>nav>div:last-child{display:flex!important;flex-direction:row!important;gap:4px;overflow-x:auto;scrollbar-width:none;margin-top:8px}`,
-    `${M} [data-shortcut-modal=settings]>nav>div:last-child>*{flex:none!important;width:auto!important}`,
-    `${M} [data-shortcut-modal=settings]>div:last-child{flex:1 1 auto!important;min-height:0;width:auto!important}`,
-    `.dsh-pwa-menu,.dsh-pwa-scrim{pointer-events:auto;border:0;padding:0;-webkit-tap-highlight-color:transparent}`,
-    `.dsh-pwa-menu{position:fixed;z-index:20;top:calc(env(safe-area-inset-top) + 8px);left:calc(env(safe-area-inset-left) + 12px);width:44px;height:44px;border-radius:50%!important;corner-shape:round!important;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:color-mix(in srgb,var(--dsw-alias-bg-base) 78%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px var(--dsw-alias-border-l3,#0002),0 4px 16px #0000001f;cursor:pointer}`,
-    `.dsh-pwa-scrim{position:fixed;z-index:20;inset:0 0 0 var(--dsh-pwa-drawer);background:#0000002e;cursor:default}`,
-    `.dsh-pwa-scrim[data-side=right]{inset:0 var(--dsh-pwa-panel) 0 0}`,
-    `@media (prefers-reduced-motion:reduce){${M} ${FRAME}>div{transition:none!important}${M} [data-sidebar-right-panel]{transition:none!important;animation:none!important}}`,
-  ].join('')
+  const mobileCss = `
+    ${M}{--dsh-pwa-drawer:min(86vw,320px);--dsh-pwa-toolbar:calc(52px + env(safe-area-inset-top));-webkit-tap-highlight-color:transparent}
+    ${M} body{overscroll-behavior:none}
+    ${M} #root{height:var(--dsh-pwa-viewport,100dvh)!important;min-height:0}
+    ${M} ${FRAME}{grid-template-columns:0 minmax(0,1fr) 0!important;box-sizing:border-box;padding-top:var(--dsh-pwa-toolbar);transition:none!important}
+    ${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:2;grid-row:1;min-width:0;min-height:0;transform:none!important;border-radius:0}
+    ${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;top:var(--dsh-pwa-toolbar);left:0;width:var(--dsh-pwa-drawer);height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-toolbar));z-index:30;box-sizing:border-box;padding:0 0 env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
+    ${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s;box-shadow:8px 0 24px #0002}
+    ${M} [data-slot=sidebar]>div{width:100%!important}
+    ${M} [data-slot=sidebar] nav button{min-height:44px}
+    ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
+    ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding-bottom:env(safe-area-inset-bottom)}
+    ${M} ${FRAME}>div[data-side]{display:none!important}
+    ${M} [data-composer-seat]{min-width:0;padding-bottom:env(safe-area-inset-bottom)}
+    ${M} [data-composer-input],${M} input,${M} textarea,${M} select{font-size:max(16px,1em)}
+    ${M} [data-slot=main]{min-width:0;min-height:0}
+    ${M} [data-shortcut-modal=settings]{flex-direction:column!important;width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(var(--dsh-pwa-viewport,100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:900px;min-width:0;border-radius:16px}
+    ${M} [data-shortcut-modal=settings]>nav{width:auto!important;min-width:0;flex:none!important;max-width:100%;padding:12px 12px 0;gap:8px;border:0}
+    ${M} [data-shortcut-modal=settings]>nav>div:last-child{display:flex;flex-direction:row;gap:4px;overflow-x:auto;overscroll-behavior-x:contain}
+    ${M} [data-shortcut-modal=settings]>nav>div:last-child>*{flex:none;width:auto;min-height:44px}
+    ${M} [data-shortcut-modal=settings]>div:last-child{flex:1 1 auto;min-height:0;min-width:0;width:auto}
+    ${M} [data-shortcut-modal=settings]>div:last-child>div:first-child{height:48px;padding:2px 12px}
+    ${M} [data-shortcut-modal=settings]>div:last-child>div:first-child button{min-width:44px;min-height:44px}
+    ${M} [data-shortcut-modal=settings]>div:last-child>div:last-child{padding:0 16px 16px;min-width:0;overflow:auto}
+    ${M} .dsh-pwa-actions button{min-height:44px}
+    .dsh-pwa-toolbar{position:fixed;top:0;left:0;right:0;height:var(--dsh-pwa-toolbar);padding:env(safe-area-inset-top) max(8px,env(safe-area-inset-right)) 0 max(8px,env(safe-area-inset-left));box-sizing:border-box;display:flex;align-items:center;gap:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-bottom:1px solid var(--dsw-alias-border-l3);pointer-events:auto}
+    .dsh-pwa-toolbar strong{font-size:14px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dsh-pwa-menu{border:0;padding:0;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:inherit;background:transparent;cursor:pointer;flex:none}
+    .dsh-pwa-menu:hover{background:var(--dsw-alias-interactive-bg-hover)}
+    .dsh-pwa-menu:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
+    .dsh-pwa-scrim{position:fixed;top:var(--dsh-pwa-toolbar);left:var(--dsh-pwa-drawer);right:0;height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-toolbar));border:0;padding:0;background:#0005;pointer-events:auto}
+    .dsh-pwa-install{display:grid;gap:12px;min-width:0}
+    .dsh-pwa-identity{display:flex;align-items:center;gap:12px}
+    .dsh-pwa-identity img{width:56px;height:56px;border-radius:12px;flex:none}
+    @media(prefers-reduced-motion:reduce){${M} ${FRAME}>div,${M} [data-sidebar-right-panel] *{transition:none!important;animation:none!important}}
+  `
   const icon = paths => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true }, paths.map(d => h('path', { key: d, d })))
-  const menuIcon = () => icon(['M4 8h16', 'M4 16h10'])
-  function toggleSidebar(ctx) {
-    const layout = ctx.get?.('layout')
-    if (layout?.toggleSidebar) layout.toggleSidebar()
-    else {
-      const t = ctx.locale.bind('sidebar'), labels = [t('toggle.open'), t('toggle.collapse')]
-      Array.from(document.querySelectorAll('[data-slot=sidebar] button')).find(button => labels.includes(button.getAttribute('aria-label')))?.click()
-    }
-  }
-  // The right Sidebar keeps its own open state; its collapse control is the only close that keeps it in sync.
-  function closePanel() { document.querySelector('[data-sidebar-right-panel] button[data-sidebar-right-toggle]')?.click() }
-  /** Floating menu button while no drawer is open; a tap-to-close scrim beside whichever drawer is. */
+  const menuIcon = () => icon(['M4 6h16', 'M4 12h16', 'M4 18h16'])
+  const closeIcon = () => icon(['M6 6l12 12', 'M18 6L6 18'])
+  function toggleSidebar(ctx) { ctx.get?.('layout')?.toggleSidebar() }
+  // Closing the occupant, not layout.closeRightbar(), keeps its state in sync.
+  function openRightPanel(root = document) { return [...root.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(panel => !panel.closest('[hidden]')) }
+  function closePanel() { openRightPanel()?.querySelector('button[data-sidebar-right-toggle]')?.click() }
   function MobileChrome({ ctx, mobile, locale }) {
     const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
     React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
-    const t = locale.bind(NS), [open, setOpen] = React.useState(null)
+    const t = locale.bind(NS), [open, setOpen] = React.useState(null), menu = React.useRef(null)
     React.useEffect(() => {
-      const frame = active && document.querySelector(FRAME)
+      if (!active) { setOpen(null); return }
+      const frame = document.querySelector(FRAME)
       if (!frame) return
+      const center = frame.querySelector(CENTER), sidebar = frame.querySelector(':scope > div:has(> [data-slot=sidebar])')
+      const right = frame.querySelector('[data-rightbar-col]')
+      const originalInert = new Map([center, sidebar].filter(Boolean).map(el => [el, el.inert]))
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
-      const side = () => frame.hasAttribute('data-rightbar-fullscreen') ? 'right' : isOpen() ? 'left' : null
+      let previous = null, timer
+      const sync = () => {
+        const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
+        setOpen(next)
+        if (center) center.inert = originalInert.get(center) || next !== null
+        if (sidebar) sidebar.inert = originalInert.get(sidebar) || next !== 'left'
+        // Return focus only when it was inside the surface that is closing.
+        if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
+        if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) menu.current?.focus({ preventScroll: true })
+        if (previous === 'left' && next === 'right') close()
+        previous = next
+      }
       const close = () => { if (isOpen()) toggleSidebar(ctx) }
-      const where = () => { const center = frame.querySelector(CENTER); return [ctx.get?.('layout')?.panelInfo?.getSnapshot?.()?.activePanelId, center?.querySelector('[data-conversation-session]')?.dataset.conversationSession, center?.querySelector('[data-slot=main]')?.childElementCount].join('|') }
-      let last = where()
-      // Like a native drawer: choosing a session, panel or New Session closes it.
-      const watch = new MutationObserver(() => { setOpen(side()); const now = where(); if (now !== last) { last = now; close() } })
-      watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed', 'data-rightbar-fullscreen', 'data-conversation-session'], subtree: true, childList: true })
-      let closeTimer
+      // Observe geometry only, not streaming messages or the conversation subtree.
+      const watch = new MutationObserver(sync)
+      watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] })
+      if (right) watch.observe(right, { subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-open', 'hidden'], childList: true })
+      const info = ctx.get?.('layout')?.panelInfo
+      let panel = info?.getSnapshot().activePanelId
+      const offPanel = info?.subscribe(() => { const next = info.getSnapshot().activePanelId; if (next !== panel) { panel = next; close() } })
       const onClick = event => {
         const target = event.target
         if (!target.closest?.('[data-slot=sidebar]')) return
-        const button = target.closest('button')
-        const newSession = button?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
-        const panel = target.closest('nav button')
-        // Row action buttons and rename inputs do not select the session.
+        const newSession = target.closest('button')?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
+        const nav = target.closest('nav button')
         const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
-        if (newSession || panel || session) { clearTimeout(closeTimer); closeTimer = setTimeout(close) }
+        if (newSession || nav || session) { clearTimeout(timer); timer = setTimeout(close) }
+      }
+      const onKey = event => {
+        // Portalled menus/dialogs own Escape before our drawer does.
+        if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role=dialog],[role=menu]')) return
+        if (previous === 'left') { event.preventDefault(); close(); menu.current?.focus() }
       }
       document.addEventListener('click', onClick, true)
-      setOpen(side())
-      return () => { clearTimeout(closeTimer); watch.disconnect(); document.removeEventListener('click', onClick, true) }
-    }, [active])
+      document.addEventListener('keydown', onKey)
+      sync()
+      return () => {
+        clearTimeout(timer); watch.disconnect(); offPanel?.()
+        document.removeEventListener('click', onClick, true); document.removeEventListener('keydown', onKey)
+        for (const [el, inert] of originalInert) el.inert = inert
+      }
+    }, [active, ctx, locale])
     if (!active) return null
-    if (open === 'right') return h('button', { type: 'button', className: 'dsh-pwa-scrim', 'data-side': 'right', 'aria-label': t('mobile.closePanel'), onClick: closePanel })
-    return open
-      ? h('button', { type: 'button', className: 'dsh-pwa-scrim', 'aria-label': t('mobile.close'), onClick: () => toggleSidebar(ctx) })
-      : h('button', { type: 'button', className: 'dsh-pwa-menu', 'aria-label': t('mobile.menu'), title: t('mobile.menu'), onClick: () => toggleSidebar(ctx) }, menuIcon())
+    const label = open === 'right' ? t('mobile.closePanel') : t(open === 'left' ? 'mobile.close' : 'mobile.menu')
+    return h(React.Fragment, null,
+      open === 'left' && h('button', { type: 'button', className: 'dsh-pwa-scrim', 'aria-label': t('mobile.dismiss'), tabIndex: -1, onClick: () => toggleSidebar(ctx) }),
+      h('div', { className: 'dsh-pwa-toolbar' },
+        h('button', { ref: menu, type: 'button', className: 'dsh-pwa-menu', 'aria-label': label, title: label, 'aria-expanded': open !== null, onClick: open === 'right' ? closePanel : () => toggleSidebar(ctx) }, open ? closeIcon() : menuIcon()),
+        h('strong', null, 'DeepSeek Harness')))
   }
   function MobileUI({ mobile, locale }) {
     const state = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
@@ -244,18 +404,20 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       state.result?.stage && h('p', { className: 'dsh-pwa-muted' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
       h('p', { className: 'dsh-pwa-muted' }, t('hint')))
   }
-  function SettingsUI({ controller, mobile, locale }) {
+  function SettingsUI({ controller, mobile, install, locale }) {
     React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
     return h('section', { className: 'dsh-pwa-settings' },
       h('h3', null, locale.bind(NS)('title')),
+      h(InstallUI, { install, locale }),
       h(MobileUI, { mobile, locale }),
       controller && h(UpdateUI, { controller, locale }))
   }
   function apply(ctx) {
     if (!ctx.slots?.inject || !ctx.locale?.register) return
-    const mobile = new MobileController()
+    const mobile = new MobileController(), install = new InstallController()
+    ctx.effect(() => mountPwaHead())
     const controller = ctx.connection?.rpc ? new UpdateController(ctx.connection) : null
-    ctx.effect(() => () => { mobile.dispose(); controller?.dispose() })
+    ctx.effect(() => () => { mobile.dispose(); install.dispose(); controller?.dispose() })
     ctx.effect(() => ctx.locale.register(NS, copy))
     ctx.effect(() => {
       const style = document.createElement('style')
@@ -266,8 +428,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     })
     if (controller) ctx.on('connection/reset', () => { void controller.load() })
     const t = ctx.locale.bind(NS)
-    ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'dsh-pwa', order: 920, label: () => t('title') }, () => h(SettingsUI, { controller, mobile, locale: ctx.locale })))
+    ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'dsh-pwa', order: 920, label: () => t('title') }, () => h(SettingsUI, { controller, mobile, install, locale: ctx.locale })))
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-pwa.mobile' }, () => h(MobileChrome, { ctx, mobile, locale: ctx.locale })))
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, copy }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy }
 } })

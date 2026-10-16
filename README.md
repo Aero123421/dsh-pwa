@@ -1,25 +1,26 @@
 # dsh-pwa — PWA & Mobile
 
-A small, installable [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **Web** plugin that gives home-screen shortcuts a crisp DeepSeek-branded icon and installable PWA metadata, and adds an optional phone layout for the Web UI. Works when the Web UI is opened locally or through an HTTPS reverse proxy, including **Tailscale Serve**, on iPad, iPhone, and other supported browsers.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) **Web** plugin that provides DeepSeek-branded home-screen icons, installable PWA metadata, installation guidance, and an optional phone layout. Use HTTPS for remote access, including an appropriately configured reverse proxy or **Tailscale Serve**; localhost is also supported for development.
 
 The settings page is shown as **PWA & Mobile**. The package, bundle and plugin ID stay `dsh-pwa`, so existing installations and the updater keep working.
 
-**Not an Electron/Desktop patch.** It does not change the native desktop app icon or add offline support.
+**Not an Electron/Desktop patch.** It does not change the native desktop app icon or add offline support. Actual home-screen installation still depends on the browser and deployment; no real-device test is claimed.
 
 ## Features
 
 - Home-screen icon for Safari on iOS/iPadOS (opaque 180×180 PNG)
 - PWA icons in 192×192 and 512×512 PNG sizes, plus separate maskable icons at both sizes with the artwork inside the center safe zone
 - `DeepSeek Harness` app name, `DSH` short name, and `standalone` display mode
-- Relative URLs for correct PWA identity on supported proxy subpaths
-- No service worker, build step, external server, or credentials. The updater depends on `semver` for the same prerelease-inclusive peer check DSH uses
+- Mount-relative manifest and icon links, with credentialed manifest discovery for authenticated proxies
+- A Settings section with the app icon, installation action when the browser offers it, Safari instructions, HTTPS guidance, and manifest/icon checks
+- No service worker, build step, external server, or new runtime dependency. The updater uses `semver` for the same prerelease-inclusive peer check DSH uses
 - Uses official Cordis WebServer hooks; leaves DSH files untouched
-- Optional PWA settings page with English/Japanese update controls and a profile-owned installation journal
-- Mobile layout switch (Auto / On / Off) on the same settings page: a slide-out sidebar drawer, a floating menu button and full-width conversation on phones
+- English/Japanese update controls and a profile-owned installation journal
+- Mobile layout switch (Auto / On / Off): a dedicated header, overlay sidebar, full-width conversation and right panel, and narrow-screen Settings
 
 ## Installation
 
-Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The mobile layout was checked against the 0.2.1-alpha.2 DOM.
+Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The revised mobile layout is checked against the published **0.2.1-alpha.3** package; see [verification scope](docs/mobile-pwa-verification.md) for the upstream source revision and limits.
 
 Install directly from GitHub into the **web** profile:
 
@@ -45,7 +46,9 @@ dsh --profile web --dump-config
 dsh web
 ```
 
-Open the authenticated URL printed by DSH, then use Safari **Share → Add to Home Screen** on the iPad/iPhone. If an old shortcut already exists, remove and recreate it to refresh the icon.
+Open the authenticated URL printed by DSH. In **Settings → PWA & Mobile → Add to Home Screen**, check the icon and metadata status. Supported browsers offer an install button when their `beforeinstallprompt` event is available; otherwise use the browser's installation menu. On iPhone/iPad, open Safari and choose **Share → Add to Home Screen**. If an old shortcut already exists, remove and recreate it to refresh the icon.
+
+A successful metadata check means the manifest and PNGs are available, not that the OS has installed the app. An accepted browser prompt is also separate from the `appinstalled` confirmation. Ordinary LAN HTTP addresses are not secure contexts; use the server's HTTPS address rather than bypassing security checks.
 
 ### Tailscale Serve
 
@@ -61,15 +64,17 @@ Replace the hostname; this is a **placeholder**, not an actual address. Open the
 
 ### Reverse-proxy mounts
 
-Links use `./pwa/...` and the manifest uses `start_url: './'` and `scope: './'`. For a mount like `/ui/`, your proxy must strip the prefix, preserve the public Host, and forward WebSocket upgrades. Follow the [official proxy guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/public-deployments.md).
+Links use `./manifest.webmanifest` and `./pwa/...`; the manifest uses `start_url: './'` and `scope: './'`. For a mount like `/ui/`, your proxy must strip the prefix, preserve the public Host, and forward WebSocket upgrades. Follow the [official proxy guide](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/public-deployments.md).
+
+The manifest link explicitly uses `crossorigin="use-credentials"`. Without it, a browser can omit the authentication cookie when fetching a same-origin manifest even though the main page is signed in; an authenticated proxy can then return its login page instead. This behavior and the required attribute are documented by [MDN](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest#deploying_a_manifest). The plugin does not loosen proxy policies, add CORS wildcards, or copy login tokens into the manifest. The metadata check reports redirects, HTML responses and inaccessible images as failures.
 
 ## Design
 
 The `cordis.patch.yml` bundle mounts `index.js` in the Web profile.
 
-- `ctx.webServer.register()` serves three public PNGs and registers an exact `/manifest.webmanifest` route. Exact routes outrank the stock frontend fallback.
-- `ctx.on('webserver/index-inject', ...)` adds `apple-touch-icon` and iOS home-screen metadata to the initial HTML response.
-- Routes and listeners are removed on plugin unload.
+- `ctx.webServer.register()` serves five public PNGs and registers an exact `/manifest.webmanifest` route. Exact routes outrank the stock frontend fallback.
+- `ctx.on('webserver/index-inject', ...)` adds the credentialed manifest link, `apple-touch-icon` and iOS home-screen metadata to the initial HTML response. The public `tapIndex` hook removes the duplicate stock manifest link and adds `viewport-fit=cover` without disabling zoom.
+- Client activation repairs discovery metadata in an already open document. Unload restores only its own attribute changes; routes, listeners and styles are also removed.
 
 The public WebServer routes still serve only static brand metadata. When DSH Connection is available, four authenticated `dsh-pwa/update-*` endpoints support the optional updater. They do not add public API routes, remote terminals, session handlers, secrets, or network bind changes. Manifest/icon registration remains independent of Connection, settings slots, and the plugin manager.
 
@@ -89,20 +94,20 @@ Open **Settings → PWA & Mobile → Mobile layout** and choose:
 
 The choice is saved in that browser's `localStorage` only, so a phone and a desktop can differ. In mobile layout:
 
-- DSH's own UI is kept; only the way its side panels appear changes.
-- The left sidebar becomes a drawer opened by the floating menu button; the conversation slides aside and a tap on it, or choosing a session, panel or New Session, closes the drawer.
-- The right panel (files, terminal…) slides in from the right instead of covering the whole screen; a tap on the conversation closes it.
-- The conversation and composer use the full width.
-- Inputs use at least 16px text so iOS Safari does not zoom on focus; safe-area insets are respected.
-- The Settings dialog stacks its navigation above the page.
+- DSH's existing UI and session state are kept. The frame becomes a single full-width content column, without translating the conversation out of view.
+- The left sidebar overlays the conversation. A dedicated header button, the backdrop, Escape, or choosing a session, panel or New Session closes it. Hidden background controls are inert while it is open.
+- The right panel (files, terminal…) uses the whole phone width. The header close button invokes the existing panel control so its state remains synchronized.
+- Inputs use at least 16px text; safe-area insets and the visual viewport height are respected. OS keyboard behavior still needs real-device verification.
+- Settings places a horizontally scrollable navigation strip above its content. The dialog, close button and content scrolling fit narrow screens.
+- DOM observation is limited to the frame state and right panel rather than every streaming conversation update.
 
-Everything is client-side CSS scoped under `html[data-dsh-mobile]` plus the official `shell.overlay` slot; no DSH file is changed. The rules target DSH's slot markers and data attributes rather than generated class names, but they follow DSH's DOM and were checked against `0.2.1-alpha.2` only — switch to **Off** if a future DSH release breaks the layout.
+Mobile CSS is scoped under `html[data-dsh-mobile]` and the controls use the official `shell.overlay` slot; no DSH file is changed. The rules target slot markers, data attributes and their direct wrappers rather than generated class names. This remains an internal DOM dependency, checked against **0.2.1-alpha.3** — switch to **Off** if a future DSH release changes that structure. [Root causes and verification notes](docs/mobile-pwa-verification.md).
 
 ## Plugin updates
 
 The PWA page in Settings shows the running plugin version. Checking is separate from installing. It distinguishes no published Release, no newer stable version, API failure, unsupported DSH, installation failure, restart required, and confirmed running version. The page uses DSH's shared React and native Button; no build or prepare step is added.
 
-Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. The PWA & Mobile release is **v0.3.0**. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and five PNG files (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-192-maskable.png`, `icon-512-maskable.png`) are checked under the exact tag before installation. Its `@deepseek-ai/dsh*` peers must satisfy the running DSH version under the same rule as app-boot (`includePrerelease`). A release with no such peer stays manual. Static PWA routes do not require the updater.
+Source installations from this GitHub repository keep the same source family and update to a validated `github:Aero123421/dsh-pwa#v<version>`. Local checkouts, tarballs, registry packages, read-only profiles, and installations without the manager stay manual. Release assets are not required for source delivery. Each candidate's package, client entry, bundle patch, and five PNG files (`apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `icon-192-maskable.png`, `icon-512-maskable.png`) are checked under the exact tag before installation. Its `@deepseek-ai/dsh*` peers must satisfy the running DSH version under the same rule as app-boot (`includePrerelease`). A release with no such peer stays manual. Static PWA routes do not require the updater.
 
 On DSH 0.2.1-alpha.3 with HMR, `installBundle` of a spec that names the saved dependency fails with `already-installed` before pnpm runs. A different git ref still installs. When the result is `already-installed`, this updater follows the official Plugins update: `removeBundle`, then `installBundle`, keeping the previous enabled selection and `saveExact`. If removal returns `stop-profile`, the bundle is still installed and `installBundle` runs over it. Any other removal failure leaves the package in place. The calls use the plugin manager service. With HMR, `removeBundle` stops this plugin before it returns; that service still accepts the following `installBundle`. The official update does the same pair from the plugin manager page, which stays loaded.
 
@@ -117,16 +122,25 @@ Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The
 ## Test
 
 ```bash
-npm ci
+npm ci --ignore-scripts
 npm test
 npm run check:dsh-peer
+npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
+npx playwright install --with-deps chromium
+node scripts/pwa-proxy-check.mjs
 npm pack --ignore-scripts
 npm run test:browser
 ```
 
 `npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
 
-Node's built-in runner checks the mobile layout mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, and the maskable icon safe zone. The optional Playwright smoke installs the packed package into an isolated real DSH profile, restarts it, and checks native Japanese controls, the 767/768px automatic boundary, saved modes, drawer opening/closing and reselection, files, composer text size, light/dark appearance, reduced motion, desktop recovery, and the manifest icons including the maskable 192 and 512 icons. The smoke clicks a visible Settings button when the sidebar has one. DSH 0.2.1-alpha.2 still shows that button. On 0.2.1-alpha.3 the account control is labeled More, its accessible name is Account menu, and Settings is a menu item; the smoke opens that menu. Screenshots and logs are saved outside the repository. The smoke registers Japanese only in its test context and uses a fixture provider key; it does not make model API calls. Also verify home-screen installation manually on iPadOS Safari and Chrome/Android; no real-device test is claimed.
+Node's built-in runner checks the mobile mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
+
+The Playwright smoke installs the packed package into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, drawers and reselection, files, composer text size, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese is registered only in the test context, and fixture provider credentials prevent model API calls.
+
+The separate proxy regression uses the production metadata routes behind a cookie gate at `/ui/` with mobile/touch emulation. It checks the missing-credentials failure as a negative control, then credentialed server discovery and repair of an already open page. It does not connect to a user's proxy or credentials.
+
+Screenshots and logs stay outside the repository; the browser workflow uploads screenshots only. Actual home-screen installation, OS keyboard behavior, user HTTPS/proxy configuration and third-party theme combinations require separate verification. **No iPhone/iPad/Android physical-device test is claimed.**
 
 ## License
 

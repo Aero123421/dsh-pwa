@@ -50,6 +50,17 @@ function send(req, res, body, contentType, cacheControl) {
   res.end(req.method === 'HEAD' ? undefined : body)
 }
 
+/** Keep a single, mount-relative discovery link and enable safe-area insets. */
+export function normalizePwaHead(html) {
+  return html.replace(/<head(?:\s[^>]*)?>[\s\S]*?<\/head>/i, head => head
+    .replace(/<link\b[^>]*>/gi, tag => /\brel\s*=\s*["']manifest["']/i.test(tag) && !/\bdata-dsh-pwa\b/i.test(tag) ? '' : tag)
+    .replace(/<meta\b[^>]*>/gi, tag => {
+      if (!/\bname\s*=\s*["']viewport["']/i.test(tag)) return tag
+      return tag.replace(/\bcontent\s*=\s*(["'])(.*?)\1/i, (_match, quote, value) =>
+        `content=${quote}${value.replace(/,?\s*viewport-fit\s*=\s*[^,]+/gi, '')}, viewport-fit=cover${quote}`)
+    }))
+}
+
 /** Mount routes before the stock SPA static-file fallback. */
 export function apply(ctx, _config, options = {}) {
   // Updater ownership stays at the plugin root; optional connection routes may be remounted.
@@ -93,6 +104,10 @@ export function apply(ctx, _config, options = {}) {
     }))
   }
 
+  // Structured rows can add metadata, but cannot update the stock viewport or
+  // remove its manifest link. tapIndex is the host's public HTML transform hook.
+  if (ctx.webServer.tapIndex) ctx.effect(() => ctx.webServer.tapIndex(normalizePwaHead))
+
   // Rendered on the server before the page is sent, so iPadOS Safari sees
   // the icon and metadata when the user first chooses Add to Home Screen.
   ctx.on('webserver/index-inject', (rows) => {
@@ -100,6 +115,7 @@ export function apply(ctx, _config, options = {}) {
       kind: 'html',
       placement: 'head',
       html: [
+        '<link data-dsh-pwa rel="manifest" href="./manifest.webmanifest" crossorigin="use-credentials">',
         '<link rel="apple-touch-icon" sizes="180x180" href="./pwa/apple-touch-icon.png">',
         '<meta name="apple-mobile-web-app-title" content="DeepSeek Harness">',
         '<meta name="apple-mobile-web-app-capable" content="yes">',
