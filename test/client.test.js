@@ -169,26 +169,34 @@ test('mobile layout follows the visual viewport when an on-screen keyboard opens
   mobile.dispose(); assert.equal(viewport.listeners.size, 0)
 })
 
-test('successful updates do not show the manager stage; failures still do', async () => {
-  const { showUpdateStage } = await clientExports()
-  assert.equal(showUpdateStage({ status: 'applied', result: { stage: 'enable' } }), false)
-  assert.equal(showUpdateStage({ status: 'restart-required', result: { stage: 'install' } }), false)
-  assert.equal(showUpdateStage({ status: 'failed', result: { stage: 'install', error: { code: 'dsh-pwa/network' } } }), true)
-  assert.equal(showUpdateStage({ status: 'unknown', result: { stage: 'remove' } }), true)
-  assert.equal(showUpdateStage({ status: 'failed', result: {} }), false)
+test('the settings page does not render manager stage names', async () => {
+  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  assert.equal(source.includes('result.stage'), false)
+  assert.equal(source.includes('revealSelectedSettingsNav'), false)
 })
 
-test('a width change scrolls the selected settings item into the nav strip', async () => {
-  const { revealSelectedSettingsNav } = await clientExports()
-  const scroller = { scrollLeft: 0, scrollWidth: 800, clientWidth: 200, getBoundingClientRect: () => ({ left: 0, right: 200, width: 200 }) }
-  const selected = { parentElement: scroller, getBoundingClientRect: () => ({ left: 240, right: 360 }) }
-  assert.equal(revealSelectedSettingsNav(selected), true)
-  assert.equal(scroller.scrollLeft, 160)
-  scroller.scrollLeft = 40
-  const visible = { parentElement: scroller, getBoundingClientRect: () => ({ left: 20, right: 90 }) }
-  assert.equal(revealSelectedSettingsNav(visible), false)
-  assert.equal(scroller.scrollLeft, 40)
-  assert.equal(revealSelectedSettingsNav(null), false)
+test('a modal, a route change, or Escape closes an open drawer once', async () => {
+  const { drawerShouldClose } = await clientExports()
+  assert.equal(drawerShouldClose({ open: true, modal: true }), true)
+  assert.equal(drawerShouldClose({ open: true, route: true }), true)
+  assert.equal(drawerShouldClose({ open: true, escape: true }), true)
+  assert.equal(drawerShouldClose({ open: true, escape: true, menu: true }), false)
+  assert.equal(drawerShouldClose({ open: false, modal: true }), false)
+})
+
+test('release notes follow the UI language and are not left as one raw markdown string', async () => {
+  const { notesForLocale, releaseNoteBlocks, inlineParts } = await clientExports()
+  const notes = { en: '# Hello\n\n- See [notes](https://example.com/n)\n\n`code`', ja: '# 日本語\n\n- 項目' }
+  assert.equal(notesForLocale(notes, 'en'), notes.en)
+  assert.equal(notesForLocale(notes, 'zh-CN'), notes.en)
+  assert.equal(notesForLocale(notes, 'ja-JP'), notes.ja)
+  assert.equal(notesForLocale('日本語だけ', 'en'), '')
+  assert.equal(notesForLocale('日本語だけ', 'ja'), '日本語だけ')
+  const blocks = releaseNoteBlocks(notes.en)
+  assert.equal(blocks.map(block => block.type).join(','), 'h,ul,p')
+  assert.equal(inlineParts(blocks.items ? '' : 'See [notes](https://example.com/n)')[1].href, 'https://example.com/n')
+  assert.equal(blocks[0].text, 'Hello')
+  assert.equal(blocks[1].items[0].includes('[notes]'), true)
 })
 
 test('the client does not define the ja language', async () => {

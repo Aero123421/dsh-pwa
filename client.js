@@ -196,7 +196,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         try { pending = this.key() && this.storage?.getItem(this.key()) } catch {}
         if (!state.requestId && pending && state.status !== 'blocked') state = await this.call('reconcile', { requestId: pending })
         if (this.closed || generation !== this.generation) return
-        if (state.requestId) this.remember(state.requestId)
+        const quiet = ['applied', 'failed', 'cancelled', 'overridden', 'idle', 'current', 'no-release', 'available', 'blocked'].includes(state.status)
+        if (state.requestId && !quiet) this.remember(state.requestId)
+        else if (quiet) {
+          this.requestId = undefined
+          try { const key = this.key(); if (key) this.storage?.removeItem(key) } catch {}
+        }
         this.publish(state)
         if (['preparing', 'installing'].includes(state.status)) this.timer = setTimeout(() => { void this.load() }, 800)
       } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network' }) }
@@ -358,7 +363,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} [data-conversation-header-leading]:empty{display:none}
     ${M} [data-conversation-tabs]{margin-top:2px;padding-left:10px;gap:28px}
     @media (min-width:560px) and (max-height:500px){
-      ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto;position:relative;z-index:5;isolation:isolate;background:var(--dsw-alias-bg-base)}
+      ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto}
       ${M} ${HEADER} [data-conversation-tabs]{grid-column:3;grid-row:1;align-self:end;margin:0 0 0 16px;padding-left:0}
     }
     ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
@@ -407,7 +412,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     .dsh-pwa-segment button[aria-pressed=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-weight:500;box-shadow:0 1px 2px #0000001f,0 0 0 .5px var(--dsw-alias-border-l3)}
     .dsh-pwa-segment button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}
     @media (hover:hover){.dsh-pwa-segment button[aria-pressed=false]:hover{color:var(--dsw-alias-label-primary)}}
-    .dsh-pwa-notes{display:grid;gap:4px;white-space:pre-wrap}
+    .dsh-pwa-notes{display:grid;gap:8px;min-width:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+    .dsh-pwa-notes :is(h3,h4,p,ul,pre){margin:0}
+    .dsh-pwa-notes h3,.dsh-pwa-notes h4{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:20px}
+    .dsh-pwa-notes ul{padding-left:1.1em}
+    .dsh-pwa-notes a{color:var(--dsw-alias-link);text-decoration:none}
+    .dsh-pwa-notes a:hover{text-decoration:underline}
+    .dsh-pwa-notes code,.dsh-pwa-notes pre{font-family:var(--dsh-font-family-code,ui-monospace,monospace)}
+    .dsh-pwa-notes pre{overflow:auto;padding:8px;border-radius:8px;background:var(--dsw-alias-bg-module-platform)}
     .dsh-pwa-link{justify-self:start;color:var(--dsw-alias-link);font-size:12px;line-height:18px;text-decoration:none}
     .dsh-pwa-link:hover{text-decoration:underline}
   `
@@ -454,10 +466,21 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         // Return focus only when it was inside the surface that is closing.
         if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
         if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) mobile.focusMenu()
+        if (next !== 'left') { closing = false; clearTimeout(closingTimer) }
         if (previous === 'left' && next === 'right') close()
         previous = next
       }
-      const close = () => { if (isOpen()) toggleSidebar(ctx) }
+      // Hold the guard until the collapsed attribute updates. A second toggle in the
+      // same turn (route observer plus the session click) would otherwise reopen it.
+      let closing = false
+      let closingTimer
+      const close = () => {
+        if (!isOpen() || closing) return
+        closing = true
+        clearTimeout(closingTimer)
+        closingTimer = setTimeout(() => { closing = false }, 500)
+        toggleSidebar(ctx)
+      }
       // Observe geometry only, not streaming messages or the conversation subtree.
       const watch = new MutationObserver(sync)
       watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] })
@@ -474,45 +497,57 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         if (newSession || nav || session) { clearTimeout(timer); timer = setTimeout(close) }
       }
       const onKey = event => {
-        // Portalled menus/dialogs own Escape before our drawer does.
-        if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role=dialog],[role=menu]')) return
+        if (event.key !== 'Escape') return
+        const modal = !!document.querySelector('[role=dialog][aria-modal="true"]')
+        const menuOpen = !!document.querySelector('[role=menu]')
+        // The dialog's own listener still receives Escape, so one key closes both.
+        if (modal) {
+          if (drawerShouldClose({ open: isOpen(), modal: true })) close()
+          return
+        }
+        if (menuOpen || event.defaultPrevented) return
         if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
       document.addEventListener('click', onClick, true)
-      document.addEventListener('keydown', onKey)
-      // A portaled dialog is a direct child of body. Streaming transcript nodes are not.
+      window.addEventListener('keydown', onKey, true)
       const onBody = records => {
         for (const record of records) {
           for (const node of record.addedNodes) {
             if (node.nodeType !== 1) continue
-            if (node.getAttribute?.('role') === 'dialog' || node.querySelector?.('[role=dialog]')) {
-              if (isOpen()) close()
-            }
+            const modal = node.getAttribute?.('role') === 'dialog' && node.getAttribute('aria-modal') === 'true' || node.querySelector?.('[role=dialog][aria-modal="true"]')
+            if (drawerShouldClose({ open: isOpen(), modal: !!modal })) close()
           }
         }
-        revealSelectedSettingsNav(document.querySelector(`${SETTINGS} nav button[aria-current="true"]`))
       }
       const bodyWatch = new MutationObserver(onBody)
       bodyWatch.observe(document.body, { childList: true })
-      let navScroller
-      const revealNav = () => revealSelectedSettingsNav(navScroller?.querySelector('button[aria-current="true"]') ?? document.querySelector(`${SETTINGS} nav button[aria-current="true"]`))
-      const navSize = new ResizeObserver(revealNav)
-      const attachNav = () => {
-        const scroller = document.querySelector(`${SETTINGS} nav button[aria-current="true"]`)?.parentElement
-        if (scroller && scroller !== navScroller) { navSize.disconnect(); navScroller = scroller; navSize.observe(scroller) }
-        revealNav()
+      const main = frame.querySelector('[data-slot=main]')
+      let route = `${location.pathname}${location.search}${location.hash}`
+      const onRoute = () => {
+        const next = `${location.pathname}${location.search}${location.hash}`
+        const moved = next !== route
+        route = next
+        if (moved && drawerShouldClose({ open: isOpen(), route: true })) close()
       }
-      attachNav()
-      const onResize = () => attachNav()
-      window.addEventListener('resize', onResize)
-      window.visualViewport?.addEventListener('resize', onResize)
-      if (document.querySelector('[role=dialog]') && isOpen()) close()
+      const onMain = () => { if (drawerShouldClose({ open: isOpen(), route: true })) close() }
+      const routeWatch = new MutationObserver(onMain)
+      if (main) routeWatch.observe(main, { childList: true })
+      const history = window.history
+      const pushState = history?.pushState, replaceState = history?.replaceState
+      if (pushState && replaceState) {
+        history.pushState = function (...args) { const result = pushState.apply(this, args); onRoute(); return result }
+        history.replaceState = function (...args) { const result = replaceState.apply(this, args); onRoute(); return result }
+      }
+      window.addEventListener('popstate', onRoute)
+      window.addEventListener('hashchange', onRoute)
+      if (drawerShouldClose({ open: isOpen(), modal: !!document.querySelector('[role=dialog][aria-modal="true"]') })) close()
       sync()
       return () => {
-        clearTimeout(timer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); navSize.disconnect()
-        document.removeEventListener('click', onClick, true); document.removeEventListener('keydown', onKey)
-        window.removeEventListener('resize', onResize)
-        window.visualViewport?.removeEventListener('resize', onResize)
+        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
+        document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
+        if (pushState && history.pushState !== pushState) history.pushState = pushState
+        if (replaceState && history.replaceState !== replaceState) history.replaceState = replaceState
         for (const [el, inert] of originalInert) el.inert = inert
       }
     }, [active, ctx, locale, mobile])
@@ -533,21 +568,74 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
       h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
   }
-  /** Scroll the selected settings item into the horizontal nav. No-op when it is already visible. */
-  function revealSelectedSettingsNav(selected) {
-    const scroller = selected?.parentElement
-    if (!selected || !scroller) return false
-    const item = selected.getBoundingClientRect()
-    const view = scroller.getBoundingClientRect()
-    if (!(view.width > 0) || scroller.scrollWidth <= scroller.clientWidth + 1) return false
-    if (item.left < view.left) { scroller.scrollLeft -= view.left - item.left; return true }
-    if (item.right > view.right) { scroller.scrollLeft += item.right - view.right; return true }
-    return false
+  /** Close the open drawer once for a route change, a modal dialog, or Escape. */
+  function drawerShouldClose({ open, modal = false, route = false, escape = false, menu = false }) {
+    if (!open) return false
+    if (modal || route) return true
+    return escape && !menu
   }
-  /** Successful updates keep the internal manager stage out of the settings page. */
-  function showUpdateStage(state) {
-    if (!state?.result?.stage) return false
-    return state.status !== 'applied' && state.status !== 'restart-required'
+  /** Legacy unmarked release text is Japanese. English and zh-CN use the en section only. */
+  function notesForLocale(notes, locale) {
+    const lang = String(locale ?? 'en').toLowerCase().split('-')[0]
+    if (typeof notes === 'string') return lang === 'ja' ? notes : ''
+    if (!notes || typeof notes !== 'object') return ''
+    if (lang === 'ja' && notes.ja) return notes.ja
+    return notes.en || ''
+  }
+  function releaseNoteBlocks(markdown) {
+    const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+    const blocks = []
+    let para = [], list = [], code = null
+    const flushPara = () => { if (para.length) { blocks.push({ type: 'p', text: para.join(' ') }); para = [] } }
+    const flushList = () => { if (list.length) { blocks.push({ type: 'ul', items: list }); list = [] } }
+    for (const line of lines) {
+      if (code) {
+        if (line.startsWith('```')) { blocks.push({ type: 'pre', text: code.join('\n') }); code = null }
+        else code.push(line)
+        continue
+      }
+      if (line.startsWith('```')) { flushPara(); flushList(); code = []; continue }
+      const heading = /^(#{1,3})\s+(.*)$/.exec(line)
+      if (heading) { flushPara(); flushList(); blocks.push({ type: 'h', level: heading[1].length, text: heading[2].trim() }); continue }
+      const item = /^\s*[-*]\s+(.*)$/.exec(line)
+      if (item) { flushPara(); list.push(item[1].trim()); continue }
+      if (!line.trim()) { flushPara(); flushList(); continue }
+      flushList(); para.push(line.trim())
+    }
+    if (code) blocks.push({ type: 'pre', text: code.join('\n') })
+    flushPara(); flushList()
+    return blocks
+  }
+  function inlineParts(text) {
+    const parts = []
+    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g
+    let cursor = 0, match
+    while ((match = pattern.exec(text))) {
+      if (match.index > cursor) parts.push({ type: 'text', text: text.slice(cursor, match.index) })
+      if (match[1]) parts.push({ type: 'a', text: match[1], href: match[2] })
+      else if (match[3]) parts.push({ type: 'strong', text: match[3] })
+      else parts.push({ type: 'code', text: match[4] })
+      cursor = match.index + match[0].length
+    }
+    if (cursor < text.length) parts.push({ type: 'text', text: text.slice(cursor) })
+    return parts
+  }
+  function inlineNodes(text, key) {
+    return inlineParts(text).map((part, index) => {
+      const id = `${key}-${index}`
+      if (part.type === 'a') return h('a', { key: id, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
+      if (part.type === 'strong') return h('strong', { key: id }, part.text)
+      if (part.type === 'code') return h('code', { key: id }, part.text)
+      return part.text
+    })
+  }
+  function ReleaseNotes({ markdown }) {
+    return releaseNoteBlocks(markdown).map((block, index) => {
+      if (block.type === 'h') return h(block.level === 1 ? 'h3' : 'h4', { key: index }, inlineNodes(block.text, index))
+      if (block.type === 'ul') return h('ul', { key: index }, block.items.map((item, itemIndex) => h('li', { key: itemIndex }, inlineNodes(item, `${index}-${itemIndex}`))))
+      if (block.type === 'pre') return h('pre', { key: index }, h('code', null, block.text))
+      return h('p', { key: index }, inlineNodes(block.text, index))
+    })
   }
   function UpdateUI({ controller, locale }) {
     const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot)
@@ -561,13 +649,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
       h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
-      state.candidate && h('div', { className: 'dsh-pwa-notes dsh-pwa-desc' }, h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`), h('p', null, state.candidate.notes)),
+      state.candidate && h('div', { className: 'dsh-pwa-notes' },
+        h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
+        notesForLocale(state.candidate.notes, locale.getSnapshot().active) && h(ReleaseNotes, { markdown: notesForLocale(state.candidate.notes, locale.getSnapshot().active) })),
       h('div', { className: 'dsh-pwa-actions' },
         h(Button, { size: 'sm', variant: 'outline', disabled: active || ['unknown', 'restart-required'].includes(state.status), onClick: () => { void controller.check() } }, t('check')),
         state.status === 'available' && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void controller.begin() } }, t('install')),
         state.status === 'unknown' && h(Button, { size: 'sm', variant: 'outline', onClick: () => { void controller.load() } }, t('reconcile'))),
       h('a', { className: 'dsh-pwa-link', href: 'https://github.com/Aero123421/dsh-pwa/releases', target: '_blank', rel: 'noopener noreferrer' }, t('manual')),
-      showUpdateStage(state) && h('p', { className: 'dsh-pwa-desc' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
       h('p', { className: 'dsh-pwa-desc' }, t('hint')))
   }
   function SettingsUI({ controller, mobile, install, locale }) {
@@ -612,5 +701,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, showUpdateStage, revealSelectedSettingsNav }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts }
 } })

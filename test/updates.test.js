@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
-import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
+import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, releaseNotes, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
 const version = '0.3.0', tag = `v${version}`
 const filename = `dsh-pwa-${version}.tgz`
 const download = `https://github.com/${REPOSITORY}/releases/download/${tag}/`
@@ -88,6 +88,7 @@ test('single pinned install preserves disabled selection; journal supports recon
   assert.equal((await restarted.reconcile(requestId)).status, 'unknown')
   bundle.version = version
   assert.equal((await restarted.reconcile(requestId)).status, 'applied')
+  assert.equal(await restarted.lastOperation(), undefined)
 })
 test('missing manager/read-only/source reject before networking and an ongoing operation rejects begin', async t => {
   const { updater, bundle } = await fixture(t, { fetcher: async () => { throw new Error('unexpected fetch') } })
@@ -580,4 +581,31 @@ test('a removeBundle throw restores when the package is confirmed gone', async t
 
 test('manager cancellation and override retain their terminal outcome despite package exit', () => {
   for (const application of ['cancelled', 'overridden']) assert.equal(resultState({ application, packageResult: { exitCode: 130, timedOut: true } }, '0.3.0', '0.2.0'), application)
+})
+
+test('release notes keep en and ja sections; an unmarked body stays Japanese', () => {
+  assert.deepEqual(releaseNotes('<!-- notes:en -->\nHello\n<!-- notes:ja -->\n日本語'), { en: 'Hello', ja: '日本語' })
+  assert.deepEqual(releaseNotes('日本語だけ'), { ja: '日本語だけ' })
+  assert.deepEqual(releaseNotes('  '), {})
+})
+
+test('installing 0.4.0 again after a finished update still allows a check', async t => {
+  const { updater, bundle, directory, manager } = await fixture(t)
+  const checked = await updater.check()
+  const id = randomUUID()
+  await updater.begin(checked.candidate.id, id, updater.base().profileKey)
+  await settle(updater)
+  bundle.version = version
+  const restarted = new PluginUpdates({ manager: () => manager, profileDir: directory, version, runtimeVersion: async () => '0.2.1-alpha.2' })
+  t.after(() => restarted.dispose())
+  assert.equal((await restarted.reconcile(id)).status, 'applied')
+  assert.equal(await restarted.lastOperation(), undefined)
+  bundle.version = '0.2.0'
+  const downgraded = new PluginUpdates({ manager: () => manager, profileDir: directory, version: '0.2.0', runtimeVersion: async () => '0.2.1-alpha.2', fetcher })
+  t.after(() => downgraded.dispose())
+  assert.equal((await downgraded.reconcile(id)).status, 'idle')
+  const again = await downgraded.check()
+  assert.equal(again.status, 'available')
+  assert.equal(again.candidate.version, version)
+  assert.deepEqual(again.candidate.notes, { ja: 'Changes' })
 })

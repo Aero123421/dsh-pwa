@@ -7,14 +7,10 @@ const header = { top: 0, bottom: 37, left: 0, right: 844 }
 const scroll = { top: 37, bottom: 390, left: 0, right: 844 }
 const message = { top: 23, bottom: 141, left: 281, right: 758 }
 
-test('a transparent landscape header fails when a scrolled message box crosses it', () => {
+test('a scrolled message clipped at the header edge does not count as overlap', () => {
   assert.equal(headerBackgroundOpaque('rgba(0, 0, 0, 0)'), false)
-  assert.ok(messageHeaderOverlap({ header, scroll, message, headerOpaque: false }) > 0)
-})
-
-test('an opaque header passes when the scrollport clips the message at the header edge', () => {
+  assert.equal(messageHeaderOverlap({ header, scroll, message }), 0)
   assert.equal(headerBackgroundOpaque('rgb(21, 21, 23)'), true)
-  assert.equal(messageHeaderOverlap({ header, scroll, message, headerOpaque: true }), 0)
 })
 
 test('a message actually visible inside the header still overlaps an opaque bar', () => {

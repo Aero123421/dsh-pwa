@@ -75,6 +75,7 @@ try {
             if (registration.id === 'dsh-pwa') {
               const factory = registration.factory
               registration = { ...registration, factory(require) {
+                window.__pwaTestRequire = require
                 const exports = factory(require), original = exports.apply
                 exports.apply = ctx => { window.__pwaTestContext = ctx; window.__pwaTestExports = exports; return original(ctx) }
                 return exports
@@ -114,6 +115,55 @@ try {
       await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       const panel = page.locator('.dsh-pwa-updates')
       await panel.getByText(`プラグインの実行版: ${manifest.version}`, { exact: true }).waitFor()
+      assert.equal(/\benable\b/.test(await panel.innerText()), false, 'the update page does not show a stage name')
+      const noteLocales = [
+        ['en', 'English notes', 'Keep', 'https://example.com/dsh-pwa'],
+        ['ja', '日本語ノート', '残す', null],
+        ['zh', 'English notes', 'Keep', 'https://example.com/dsh-pwa'],
+      ]
+      for (const [localeId, heading, strong, link] of noteLocales) {
+        await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
+        await page.evaluate(localeId => {
+          const React = window.__pwaTestRequire('react')
+          const { createRoot } = window.__pwaTestRequire('react-dom/client')
+          const { UpdateUI } = window.__pwaTestExports
+          const previous = document.querySelector('.dsh-pwa-notes-probe')
+          previous?.__pwaNotesRoot?.unmount(); previous?.remove()
+          const host = document.createElement('div')
+          host.className = 'dsh-pwa-notes-probe'
+          host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;width:min(420px,calc(100vw - 32px));background:var(--dsw-alias-bg-base,#fff);padding:12px;border-radius:12px'
+          const state = {
+            status: 'available', runtimeVersion: '0.4.0', installedVersion: '0.4.0', result: { stage: 'enable' },
+            candidate: { version: '0.4.2', compatibility: '0.2.x', notes: { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**' } },
+          }
+          const controller = { subscribe: () => () => {}, getSnapshot: () => state, load: async () => {}, check: async () => {}, begin: async () => {} }
+          const root = createRoot(host)
+          host.__pwaNotesRoot = root
+          root.render(React.createElement(UpdateUI, { controller, locale: window.__pwaTestContext.locale }))
+          host.dataset.locale = localeId
+        }, localeId)
+        const probe = page.locator('.dsh-pwa-notes-probe')
+        await probe.getByRole('heading', { name: heading, exact: true }).waitFor()
+        assert.equal(await probe.locator('strong').innerText(), strong)
+        if (link) assert.equal(await probe.locator('a').getAttribute('href'), link)
+        else assert.equal(await probe.locator('a').count(), 0)
+        const probeText = await probe.innerText()
+        assert.equal(probeText.includes('##'), false)
+        assert.equal(probeText.includes('**'), false)
+        assert.equal(/\benable\b/.test(probeText), false, `stage name stays off the page in ${localeId}`)
+        assert.equal(await probe.getByRole('button', { name: /Check for updates|更新を確認|检查更新/ }).isEnabled(), true)
+        await page.screenshot({ path: join(world, `notes-${localeId}.png`), animations: 'disabled' })
+      }
+      await page.evaluate(() => {
+        const host = document.querySelector('.dsh-pwa-notes-probe')
+        const plain = window.__pwaTestExports.notesForLocale('日本語だけ', 'zh')
+        if (plain !== '') throw new Error('unmarked Japanese notes were shown outside ja')
+        host?.__pwaNotesRoot?.unmount(); host?.remove()
+        const locale = window.__pwaTestContext.locale
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        locale.setLocale('ja')
+      })
+      await panel.getByRole('button', { name: '更新を確認', exact: true }).waitFor()
       const state = await page.evaluate(async () => {
         const method = 'dsh-pwa/update-status'
         return (await fetch(`/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: 'smoke', method, payload: {} }) })).json()
@@ -204,6 +254,25 @@ try {
       await page.setViewportSize({ width: 390, height: 900 })
       await drawer()
       await page.keyboard.press('Escape'); await menu.waitFor()
+      await drawer()
+      await openSettings()
+      await page.getByRole('dialog').waitFor()
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame?.hasAttribute('data-sidebar-collapsed') && !document.querySelector('.dsh-pwa-scrim')
+      })
+      await page.screenshot({ path: join(world, 'drawer-closed-for-settings.png'), animations: 'disabled' })
+      await page.evaluate(() => window.__pwaTestContext.get('layout').toggleSidebar())
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame && !frame.hasAttribute('data-sidebar-collapsed') && document.querySelector('[role=dialog][aria-modal="true"]')
+      })
+      await page.screenshot({ path: join(world, 'drawer-open-under-settings.png'), animations: 'disabled' })
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame?.hasAttribute('data-sidebar-collapsed') && !document.querySelector('.dsh-pwa-scrim') && !document.querySelector('[role=dialog][aria-modal="true"]')
+      })
       await drawer()
       await page.screenshot({ path: join(world, 'mobile-drawer-open.png'), animations: 'disabled' })
       // The header menu is behind the open drawer; the backdrop closes it.
