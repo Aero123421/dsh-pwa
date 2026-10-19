@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
-import { headerBackgroundOpaque, rectangleOverlap } from './landscape-overlap.mjs'
+import { headerBackgroundOpaque, messageHeaderOverlap } from './landscape-overlap.mjs'
 const world = await mkdtemp(join(tmpdir(), 'dsh-pwa-smoke-'))
 // Local Anthropic-format stub: one fixed Markdown reply with a wide table. No model API is called.
 const reply = '| Column A | Column B | A much longer column C | Column D |\n| --- | --- | --- | --- |\n| 1 | value | a long cell that needs more than the narrow phone width | ok |\n\nEnd of fixture reply.'
@@ -90,9 +90,11 @@ try {
       const notice = page.getByRole('button', { name: /Continue|继续|続ける/ }).first()
       if (await notice.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await notice.click()
       await page.waitForFunction(() => !!window.__pwaTestContext)
-      const ja = await page.evaluate(() => window.__pwaTestContext.locale.getSnapshot().locales.find(language => language.id === 'ja'))
-      assert.equal(ja?.label, '日本語', 'the plugin alone adds ja to the language list')
-      await page.evaluate(() => window.__pwaTestContext.locale.setLocale('ja'))
+      await page.evaluate(() => {
+        const locale = window.__pwaTestContext.locale
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        locale.setLocale('ja')
+      })
       const onboarding = page.getByRole('button', { name: 'Configure later', exact: true })
       if (await onboarding.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await onboarding.click()
       // The account launcher replaces the sidebar Settings button. Its accessible
@@ -170,7 +172,7 @@ try {
         if (plain !== '') throw new Error('unmarked Japanese notes were shown outside ja')
         host?.__pwaNotesRoot?.unmount(); host?.remove()
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('ja left the language list')
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
         locale.setLocale('ja')
       })
       const check = panel.getByRole('button', { name: '更新を確認', exact: true })
@@ -236,23 +238,6 @@ try {
         const overflow = await panel.evaluate(element => element.scrollWidth - element.clientWidth)
         assert.ok(overflow <= 1, `PWA panel overflow at ${width}px: ${overflow}`)
         await page.screenshot({ path: join(world, `pwa-${restart}-${width}-ja.png`), fullPage: false })
-        if (width === 320) {
-          await page.keyboard.press('Escape')
-          await page.getByRole('dialog').waitFor({ state: 'hidden' })
-          await page.getByRole('button', { name: 'サイドバーを開く', exact: true }).click()
-          await openSettings()
-          await page.getByRole('dialog').waitFor()
-          await page.waitForFunction(() => document.querySelector('[data-slot=root] > div')?.hasAttribute('data-sidebar-collapsed'))
-          await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
-          await page.waitForFunction(() => {
-            const selected = document.querySelector('[data-shortcut-modal=settings] [aria-current="true"]')
-            const scroller = selected?.parentElement
-            if (!selected || !scroller) return false
-            const item = selected.getBoundingClientRect(), view = scroller.getBoundingClientRect()
-            return item.left >= view.left - 1 && item.right <= view.right + 1
-          })
-          await page.screenshot({ path: join(world, `settings-nav-320-after-${restart}.png`), animations: 'disabled' })
-        }
       }
       const mobile = page.locator('.dsh-pwa-mobile')
       async function active(value) { await page.waitForFunction(value => document.documentElement.hasAttribute('data-dsh-mobile') === value, value) }
@@ -266,7 +251,7 @@ try {
       assert.equal(await page.locator('.dsh-pwa-menu').count(), 0)
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('ja left the language list')
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
         locale.setLocale('ja')
       })
       await openSettings()
@@ -433,17 +418,14 @@ try {
               const shots = []
               for (const top of [0, 48, scrollEl.scrollHeight]) {
                 scrollEl.scrollTop = top
-                const style = getComputedStyle(headerEl)
                 shots.push({
-                  scrollTop: scrollEl.scrollTop,
                   header: box(headerEl),
+                  scroll: box(scrollEl),
                   messages: [...document.querySelectorAll('[data-chat-flow-kind]')].map(box),
-                  background: style.backgroundColor,
-                  position: style.position,
-                  zIndex: style.zIndex,
+                  background: getComputedStyle(headerEl).backgroundColor,
                 })
               }
-              scrollEl.scrollTop = 0
+              scrollEl.scrollTop = 48
               const header = headerEl.getBoundingClientRect()
               const title = headerEl.querySelector('nav')?.getBoundingClientRect().width ?? 0
               const buttons = [...headerEl.querySelectorAll('button')].filter(button => !button.closest('[data-conversation-tabs]') && !button.classList.contains('dsh-pwa-menu')).map(button => button.getBoundingClientRect().width)
@@ -452,11 +434,13 @@ try {
             assert.ok(samples.headerHeight <= 48, `landscape header stays one row at ${width}px: ${samples.headerHeight}`)
             assert.ok(samples.title >= 80, `session title keeps its width at ${width}px: ${samples.title}`)
             assert.ok(samples.standard >= 28, `Standard mode keeps its width at ${width}px: ${samples.standard}`)
-            const resting = samples.shots.find(shot => shot.scrollTop === 0)
-            assert.equal(resting.position, 'sticky', `landscape header stays above the transcript at ${width}x${height}`)
-            assert.ok(Number(resting.zIndex) >= 1, `landscape header stacks above messages at ${width}x${height}`)
-            assert.equal(headerBackgroundOpaque(resting.background), true, `landscape header background is opaque at ${width}x${height}: ${resting.background}`)
-            assert.equal(rectangleOverlap(resting.header, resting.messages[0]), 0, `header overlaps the first message at ${width}x${height}`)
+            for (const shot of samples.shots) {
+              const headerOpaque = headerBackgroundOpaque(shot.background)
+              for (const message of shot.messages) {
+                const area = messageHeaderOverlap({ header: shot.header, scroll: shot.scroll, message, headerOpaque })
+                assert.equal(area, 0, `header overlaps a message at ${width}x${height} (opaque ${headerOpaque})`)
+              }
+            }
             const tabs = landscape.locator('[data-conversation-tabs] [role=tab]')
             assert.equal(await tabs.count(), 2)
             await tabs.nth(1).click()

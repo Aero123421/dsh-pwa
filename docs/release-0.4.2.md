@@ -2,17 +2,13 @@
 
 # v0.4.2 — PWA & Mobile
 
-The mobile header stays above the first message, Settings closes the drawer, and plugin update text follows the UI language.
+Opening Settings closes the mobile drawer, and plugin update text follows the UI language.
 
-- On a phone, the conversation header sticks to the top with the page background, so the first message's rectangle does not sit under it.
-- Opening Settings, or any dialog, closes the left drawer. Changing the main view does the same. One Escape closes the dialog and the drawer together. This does not depend on glass-ui.
-- Opening Settings scrolls the selected navigation item into view.
+- Opening Settings, or any dialog, closes the left drawer. Changing the main view, including choosing another conversation, does the same. One Escape closes the dialog and the drawer together. This does not depend on glass-ui.
 - A successful update does not show the internal stage name. Other results still can.
-- After a finished update, installing 0.4.0 again does not leave **Check for updates** disabled.
-- Release notes render as Markdown. English and zh-CN use the English section. Japanese uses the Japanese section. An older note without language markers stays Japanese and is hidden in English and zh-CN.
-- **日本語** appears in the language list from this plugin. There is no Chinese dictionary; zh-CN shows the English copy. The rest of DSH still needs dsh-japanese for Japanese.
-
-The light `theme-color` is `#ffffff`. Icon caching is unchanged. A dark launch screen can stay white, and the icons are still served without an ETag.
+- After a finished update, installing 0.4.0 again does not leave **Check for updates** disabled. `viewStatus` in `updates.js` treats an older installed bundle as idle, and `PluginUpdates.reconcile` does not keep a previously applied operation in the way.
+- Release notes render as Markdown. `releaseNotes` splits `<!-- notes:en -->` and `<!-- notes:ja -->`. `notesForLocale` and `ReleaseNotes` in `client.js` show the English section for English and zh-CN, and the Japanese section for Japanese. An older note without language markers stays Japanese and is hidden in English and zh-CN.
+- This plugin registers its `ja` dictionary and does not define the language. Japanese for DSH needs dsh-japanese. There is no Chinese dictionary.
 
 ## Install
 
@@ -22,29 +18,26 @@ dsh plugin --profile web add -w github:Aero123421/dsh-pwa#v0.4.2
 
 GitHub source installs can also update from Settings. Restart DSH after an update. Local and tgz installs stay manual.
 
-This plugin adds 日本語 to the language list. Japanese for the rest of DSH needs [dsh-japanese](https://github.com/Aero123421/dsh-japanese).
+Japanese for DSH needs [dsh-japanese](https://github.com/Aero123421/dsh-japanese).
 
 ## Known issues
 
-- Home-screen install, the on-screen keyboard, and other iOS / Safari behavior are still unverified beyond the reported landscape checks.
-- npm may fail to install DSH `0.2.1-rc.2` because of DSH's own dependencies.
+- On DSH 0.2.1-rc.2 at 844×390, the control that moves down to the latest message overlaps the table. That control belongs to DSH.
+- iOS and Safari are unverified.
 - In dark mode the launch screen can stay white, and the PWA icons have no ETag.
+- npm may fail to install DSH `0.2.1-rc.2` because of DSH's own dependencies.
 
 <!-- notes:ja -->
 
 # v0.4.2 — PWA・モバイル
 
-モバイルのヘッダーを最初のメッセージの上に置き、設定を開くとドロワーを閉じ、更新ノートを表示中の言語で出します。
+設定を開くとモバイルのドロワーを閉じ、更新ノートを表示中の言語で出します。
 
-- 会話ヘッダーは画面上部に残り、ページの背景色です。最初のメッセージの矩形はヘッダーと重なりません。
-- 設定、またはほかのダイアログが開くと左ドロワーを閉じます。メイン画面が切り替わったときも閉じます。Escape 1回でダイアログとドロワーの両方が閉じます。glass-ui には依存しません。
-- 設定を開くと、選択中の項目がナビの表示範囲に入ります。
+- 設定、またはほかのダイアログが開くと左ドロワーを閉じます。別の会話を選ぶなど、メイン画面が切り替わったときも閉じます。Escape 1回でダイアログとドロワーの両方が閉じます。glass-ui には依存しません。
 - 更新が成功したとき（applied）は内部の段階名を出しません。それ以外の結果では出すことがあります。
-- 更新が終わったあと 0.4.0 を入れ直しても、「更新を確認」は押せます。
-- リリースノートは Markdown として表示します。英語と zh-CN は英語の節、日本語は日本語の節です。言語の印がない古いノートは日本語とみなし、英語と zh-CN では出しません。
-- 言語の一覧に「日本語」を足します。中国語の辞書はなく、zh-CN では英語です。DSH 本体の日本語には dsh-japanese が必要です。
-
-ライトの `theme-color` は `#ffffff` です。アイコンのキャッシュは変えていません。ダークでも起動画面が白くなることと、アイコンに ETag が無いことは残っています。
+- 更新が終わったあと 0.4.0 を入れ直しても、「更新を確認」は押せます。`updates.js` の `viewStatus` は、導入版が実行版より古いとき idle にします。`PluginUpdates.reconcile` は、一度 applied になった操作が後の導入を止めないようにします。
+- リリースノートは Markdown として表示します。`releaseNotes` が `<!-- notes:en -->` と `<!-- notes:ja -->` で分け、`client.js` の `notesForLocale` と `ReleaseNotes` が、英語と zh-CN では英語の節、日本語では日本語の節を出します。言語の印がない古いノートは日本語とみなし、英語と zh-CN では出しません。
+- このプラグインは ja の辞書を登録し、言語そのものは定義しません。DSH の日本語には dsh-japanese が必要です。中国語の辞書はありません。
 
 ## 導入・更新
 
@@ -54,10 +47,11 @@ dsh plugin --profile web add -w github:Aero123421/dsh-pwa#v0.4.2
 
 GitHubソースから導入済みの場合は、設定画面の更新機能も利用できます。更新後はDSHを再起動してください。ローカル・tgz導入は手動更新です。
 
-このプラグインは言語一覧に日本語を足します。DSH 本体を日本語にするには [dsh-japanese](https://github.com/Aero123421/dsh-japanese) が必要です。
+DSH を日本語にするには [dsh-japanese](https://github.com/Aero123421/dsh-japanese) が必要です。
 
 ## 既知の問題
 
-- ホーム画面への追加、OSキーボード、その他の iOS / Safari の挙動は、報告された横向き確認以外は未検証です。
-- npm で `0.2.1-rc.2` が入らない場合があります（DSH 本体の依存の問題）。
+- DSH 0.2.1-rc.2 の 844×390 では、最新のメッセージへ下へ移動するボタンが表に重なります。このボタンは DSH 本体のものです。
+- iOS と Safari は未確認です。
 - ダークモードでも起動画面が白くなることがあり、PWA アイコンに ETag がありません。
+- npm で `0.2.1-rc.2` が入らない場合があります（DSH 本体の依存の問題）。
