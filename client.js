@@ -553,13 +553,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-pwa.mobile' }, () => h(MobileChrome, { ctx, mobile, locale: ctx.locale })))
     // Official seat for global navigation before the Session title; empty in stock DSH. It holds a
     // single entry, so register only while the mobile layout is active and never shadow another
-    // plugin's desktop content. If another entry wins the seat, the fallback toolbar stays.
+    // plugin's desktop content. Priority 100 yields to ordinary registrations (default 0);
+    // equal priorities throw in DSH instead of electing a winner. The fallback toolbar stays.
     ctx.slots.inject('conversation.header.leading', () => {
       let dispose = null
       const sync = () => {
         if (mobile.getSnapshot().active === !!dispose) return
         if (dispose) { dispose(); dispose = null; return }
-        dispose = ctx.slots.register({ name: 'conversation.header.leading', id: 'dsh-pwa.menu' }, () => h(MenuButton, { ctx, mobile, locale: ctx.locale, inline: true }))
+        dispose = ctx.slots.register({ name: 'conversation.header.leading', id: 'dsh-pwa.menu', priority: 100 }, () => h(MenuButton, { ctx, mobile, locale: ctx.locale, inline: true }))
       }
       const unsubscribe = mobile.subscribe(sync)
       sync()

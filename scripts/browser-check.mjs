@@ -212,6 +212,22 @@ try {
       await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).first().click(); await menu.waitFor()
       assert.equal(await page.locator('.dsh-pwa-toolbar').count(), 0, 'conversation views use the header menu, not the fallback toolbar')
       assert.equal(await page.locator('[data-conversation-header-leading] .dsh-pwa-menu-inline').count(), 1)
+      // A normal-priority plugin must coexist with our fallback header contribution.
+      await page.evaluate(() => {
+        window.__pwaOtherHeaderDispose = window.__pwaTestContext.slots.register(
+          { name: 'conversation.header.leading', id: 'pwa-test.other-header' }, () => 'Other header')
+      })
+      await page.locator('.dsh-pwa-toolbar').waitFor()
+      assert.equal(await page.locator('.dsh-pwa-menu-inline').count(), 0)
+      await drawer(); await page.keyboard.press('Escape'); await menu.waitFor()
+      await page.setViewportSize({ width: 1280, height: 900 }); await active(false)
+      await page.waitForFunction(() => document.querySelector('[data-conversation-header-leading]')?.textContent.includes('Other header'))
+      assert.equal(await page.evaluate(() => window.__pwaTestContext.slots.entries('conversation.header.leading').length), 1, 'desktop keeps the other plugin registration')
+      await page.setViewportSize({ width: 390, height: 900 }); await active(true)
+      await page.locator('.dsh-pwa-toolbar').waitFor()
+      await page.evaluate(() => { window.__pwaOtherHeaderDispose(); delete window.__pwaOtherHeaderDispose })
+      await page.locator('.dsh-pwa-menu-inline').waitFor()
+      await page.locator('.dsh-pwa-toolbar').waitFor({ state: 'hidden' })
       await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
       await page.locator('.dsh-pwa-toolbar').waitFor()
       assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile-toolbar')), true, 'pages without a conversation header keep the toolbar')

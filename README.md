@@ -96,7 +96,7 @@ The choice is saved in that browser's `localStorage` only, so a phone and a desk
 
 - DSH's existing UI and session state are kept. The frame becomes a single full-width content column, without translating the conversation out of view.
 - In a conversation, the menu button sits in DSH's official `conversation.header.leading` seat, before the Session title, so the screen keeps one compact header. Pages without a conversation header (Plugins, Automation tasks) get a separate top bar with the same button. In landscape, the Chat/Trajectory tabs move onto the title row.
-- The left sidebar overlays the conversation. The menu button, the backdrop, Escape, or choosing a session, panel or New Session closes it. Hidden background controls are inert while it is open.
+- The left sidebar overlays the conversation. The backdrop, Escape, or choosing a session, panel or New Session closes it; on pages with the separate top bar, its menu button also closes it. Hidden background controls are inert while it is open.
 - The right panel (files, terminal…) uses the whole phone width and closes with its own panel button.
 - Wide Markdown tables scroll sideways with a finger. Stock DSH shows their scrollbar only on mouse hover, so the right-hand columns were unreachable on a touch screen.
 - Inputs use at least 16px text. The app follows the visual viewport: when an on-screen keyboard opens, the app shrinks to the visible area and moves with it, and the bottom safe-area gap under the composer is dropped. Left and right safe areas (the notch in landscape) are kept clear. OS keyboard behavior still needs real-device verification.
