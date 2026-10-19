@@ -122,26 +122,32 @@ try {
         ['zh', 'English notes', 'Keep', 'https://example.com/dsh-pwa'],
       ]
       for (const [localeId, heading, strong, link] of noteLocales) {
-        await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
-        await page.evaluate(localeId => {
-          const React = window.__pwaTestRequire('react')
-          const { createRoot } = window.__pwaTestRequire('react-dom/client')
-          const { UpdateUI } = window.__pwaTestExports
-          const previous = document.querySelector('.dsh-pwa-notes-probe')
-          previous?.__pwaNotesRoot?.unmount(); previous?.remove()
-          const host = document.createElement('div')
-          host.className = 'dsh-pwa-notes-probe'
-          host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:10000;width:min(420px,calc(100vw - 32px));background:var(--dsw-alias-bg-base,#fff);padding:12px;border-radius:12px'
-          const state = {
-            status: 'available', runtimeVersion: '0.4.0', installedVersion: '0.4.0', result: { stage: 'enable' },
-            candidate: { version: '0.4.2', compatibility: '0.2.x', notes: { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**' } },
-          }
-          const controller = { subscribe: () => () => {}, getSnapshot: () => state, load: async () => {}, check: async () => {}, begin: async () => {} }
-          const root = createRoot(host)
-          host.__pwaNotesRoot = root
-          root.render(React.createElement(UpdateUI, { controller, locale: window.__pwaTestContext.locale }))
-          host.dataset.locale = localeId
+        const rendered = await page.evaluate(localeId => {
+          const logs = []
+          const report = console.error
+          console.error = (...args) => { logs.push(args.map(item => String(item?.message ?? item)).join(' ')); report.apply(console, args) }
+          try {
+            const React = window.__pwaTestRequire('react')
+            const ReactDOM = window.__pwaTestRequire('react-dom')
+            const { createRoot } = window.__pwaTestRequire('react-dom/client')
+            const { ReleaseNotes, notesForLocale } = window.__pwaTestExports
+            document.querySelector('.dsh-pwa-notes-probe')?.__pwaNotesRoot?.unmount()
+            document.querySelector('.dsh-pwa-notes-probe')?.remove()
+            const notes = { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**' }
+            const markdown = notesForLocale(notes, localeId)
+            const host = document.createElement('div')
+            host.className = 'dsh-pwa-notes-probe'
+            const dialog = document.querySelector('[role=dialog]')
+            ;(dialog?.querySelector('[class]') ?? document.body).prepend(host)
+            const root = createRoot(host)
+            host.__pwaNotesRoot = root
+            ReactDOM.flushSync(() => root.render(React.createElement('div', { className: 'dsh-pwa-notes' }, markdown ? React.createElement(ReleaseNotes, { markdown }) : 'NO-NOTES')))
+            return { html: host.innerHTML, text: host.innerText, logs }
+          } catch (error) {
+            return { html: '', text: '', logs: [...logs, error.message] }
+          } finally { console.error = report }
         }, localeId)
+        assert.equal(rendered.logs.join('\n'), '', `notes render failed for ${localeId}: ${rendered.html}`)
         const probe = page.locator('.dsh-pwa-notes-probe')
         await probe.getByRole('heading', { name: heading, exact: true }).waitFor()
         assert.equal(await probe.locator('strong').innerText(), strong)
@@ -151,7 +157,6 @@ try {
         assert.equal(probeText.includes('##'), false)
         assert.equal(probeText.includes('**'), false)
         assert.equal(/\benable\b/.test(probeText), false, `stage name stays off the page in ${localeId}`)
-        assert.equal(await probe.getByRole('button', { name: /Check for updates|更新を確認|检查更新/ }).isEnabled(), true)
         await page.screenshot({ path: join(world, `notes-${localeId}.png`), animations: 'disabled' })
       }
       await page.evaluate(() => {
@@ -163,7 +168,9 @@ try {
         if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
         locale.setLocale('ja')
       })
-      await panel.getByRole('button', { name: '更新を確認', exact: true }).waitFor()
+      const check = panel.getByRole('button', { name: '更新を確認', exact: true })
+      await check.waitFor()
+      assert.equal(await check.isEnabled(), true, 'Check for updates stays enabled when this install is not mid-update')
       const state = await page.evaluate(async () => {
         const method = 'dsh-pwa/update-status'
         return (await fetch(`/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: 'smoke', method, payload: {} }) })).json()

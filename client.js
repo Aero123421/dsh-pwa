@@ -701,5 +701,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes }
 } })
