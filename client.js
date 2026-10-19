@@ -358,7 +358,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
     ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding:0 ${SAFE_R} ${SAFE_B} ${SAFE_L}}
     ${M} ${FRAME}>div[data-side]{display:none!important}
-    ${M} ${HEADER}{min-height:0;padding:6px 20px 0 6px}
+    ${M} ${HEADER}{position:sticky;top:0;z-index:4;background:var(--dsw-alias-bg-base);min-height:0;padding:6px 20px 0 6px}
     ${M} ${HEADER}:not(:has([data-conversation-tabs])){padding-bottom:6px}
     ${M} [data-conversation-header-leading]:empty{display:none}
     ${M} [data-conversation-tabs]{margin-top:2px;padding-left:10px;gap:28px}
@@ -496,6 +496,18 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
         if (newSession || nav || session) { clearTimeout(timer); timer = setTimeout(close) }
       }
+      let navWatch
+      const onDialog = node => {
+        if (!openedDialog(node)) return
+        if (drawerShouldClose({ open: isOpen(), modal: true })) close()
+        const settings = document.querySelector('[data-shortcut-modal=settings]')
+        navWatch?.disconnect()
+        if (settings) {
+          navWatch = new MutationObserver(() => revealSelectedSettingsNav())
+          navWatch.observe(settings, { subtree: true, attributes: true, attributeFilter: ['aria-current'] })
+        }
+        requestAnimationFrame(() => revealSelectedSettingsNav())
+      }
       const onKey = event => {
         if (event.key !== 'Escape') return
         const modal = !!document.querySelector('[role=dialog][aria-modal="true"]')
@@ -511,13 +523,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
       const onBody = records => {
-        for (const record of records) {
-          for (const node of record.addedNodes) {
-            if (node.nodeType !== 1) continue
-            const modal = node.getAttribute?.('role') === 'dialog' && node.getAttribute('aria-modal') === 'true' || node.querySelector?.('[role=dialog][aria-modal="true"]')
-            if (drawerShouldClose({ open: isOpen(), modal: !!modal })) close()
-          }
-        }
+        for (const record of records) for (const node of record.addedNodes) onDialog(node)
       }
       const bodyWatch = new MutationObserver(onBody)
       bodyWatch.observe(document.body, { childList: true })
@@ -540,10 +546,10 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       }
       window.addEventListener('popstate', onRoute)
       window.addEventListener('hashchange', onRoute)
-      if (drawerShouldClose({ open: isOpen(), modal: !!document.querySelector('[role=dialog][aria-modal="true"]') })) close()
+      if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) })) close()
       sync()
       return () => {
-        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
+        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); navWatch?.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
         document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
         if (pushState && history.pushState !== pushState) history.pushState = pushState
@@ -567,6 +573,19 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       h('div', { className: 'dsh-pwa-segment', role: 'group', 'aria-label': t('mobile.title') },
         MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
       h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
+  }
+  /** Settings or any dialog, including one that is nested in a newly added portal. */
+  function openedDialog(node) {
+    if (!node || node.nodeType !== 1) return false
+    return node.matches?.('[data-shortcut-modal=settings], [role=dialog]') || !!node.querySelector?.('[data-shortcut-modal=settings], [role=dialog]')
+  }
+  /** Bring the selected settings row into the horizontal nav when the dialog opens. */
+  function revealSelectedSettingsNav(root = document) {
+    root.querySelector('[data-shortcut-modal=settings] [aria-current="true"]')?.scrollIntoView({ inline: 'nearest' })
+  }
+  /** A finished update has no manager stage name. Other results may still show one. */
+  function showUpdateStage(state) {
+    return state?.status !== 'applied' && typeof state?.result?.stage === 'string' && state.result.stage.length > 0
   }
   /** Close the open drawer once for a route change, a modal dialog, or Escape. */
   function drawerShouldClose({ open, modal = false, route = false, escape = false, menu = false }) {
@@ -649,6 +668,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
       h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
+      showUpdateStage(state) && h('p', { className: 'dsh-pwa-state' }, state.result.stage),
       state.candidate && h('div', { className: 'dsh-pwa-notes' },
         h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
         notesForLocale(state.candidate.notes, locale.getSnapshot().active) && h(ReleaseNotes, { markdown: notesForLocale(state.candidate.notes, locale.getSnapshot().active) })),
@@ -674,6 +694,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     const controller = ctx.connection?.rpc ? new UpdateController(ctx.connection) : null
     ctx.effect(() => () => { mobile.dispose(); install.dispose(); controller?.dispose() })
     ctx.effect(() => ctx.locale.register(NS, copy))
+    // ja is selectable from this plugin alone. dsh-japanese may already own the definition.
+    ctx.effect(() => {
+      if (ctx.locale.getSnapshot().locales.some(language => language.id === 'ja')) return
+      try { return ctx.locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }) }
+      catch (error) { if (!/already registered/.test(String(error?.message ?? error))) throw error }
+    })
     ctx.effect(() => {
       const style = document.createElement('style')
       style.dataset.dshPwaUpdates = ''
@@ -701,5 +727,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, revealSelectedSettingsNav, showUpdateStage }
 } })

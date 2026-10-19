@@ -169,10 +169,20 @@ test('mobile layout follows the visual viewport when an on-screen keyboard opens
   mobile.dispose(); assert.equal(viewport.listeners.size, 0)
 })
 
-test('the settings page does not render manager stage names', async () => {
+test('a successful update hides the stage name and the settings nav scrolls the selection into view', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
-  assert.equal(source.includes('result.stage'), false)
-  assert.equal(source.includes('revealSelectedSettingsNav'), false)
+  const { showUpdateStage, openedDialog, revealSelectedSettingsNav } = await clientExports()
+  assert.equal(showUpdateStage({ status: 'applied', result: { stage: 'enable' } }), false)
+  assert.equal(showUpdateStage({ status: 'failed', result: { stage: 'enable' } }), true)
+  assert.equal(showUpdateStage({ status: 'applied' }), false)
+  assert.match(source, /scrollIntoView\(\{ inline: 'nearest' \}\)/)
+  const selected = { scrollIntoView(options) { selected.options = options } }
+  const root = { querySelector: () => selected }
+  revealSelectedSettingsNav(root)
+  assert.equal(selected.options.inline, 'nearest')
+  const dialog = { nodeType: 1, matches: () => false, querySelector: selector => selector.includes('role=dialog') ? {} : null }
+  assert.equal(openedDialog(dialog), true)
+  assert.equal(openedDialog({ nodeType: 3 }), false)
 })
 
 test('a modal, a route change, or Escape closes an open drawer once', async () => {
@@ -199,9 +209,12 @@ test('release notes follow the UI language and are not left as one raw markdown 
   assert.equal(blocks[1].items[0].includes('[notes]'), true)
 })
 
-test('the client does not define the ja language', async () => {
+test('the plugin adds ja when the language list does not already contain it', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
-  assert.equal(source.includes('addLanguage'), false)
+  assert.match(source, /addLanguage\(\{ id: 'ja', label: '日本語', fallback: 'en' \}\)/)
+  assert.match(source, /language\.id === 'ja'/)
+  const check = await readFile(new URL('../scripts/browser-check.mjs', import.meta.url), 'utf8')
+  assert.equal(check.includes('addLanguage'), false)
 })
 
 test('a conversation header menu replaces the fallback toolbar only while mounted', async () => {

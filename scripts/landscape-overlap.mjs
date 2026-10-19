@@ -12,6 +12,14 @@ export function headerBackgroundOpaque(color) {
   return Number(parts[3]) > 0.99
 }
 
+export function rectangleOverlap(a, b) {
+  if (!a || !b) return 0
+  const width = Math.min(a.right, b.right) - Math.max(a.left, b.left)
+  const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
+  if (width > 0.5 && height > 0.5) return width * height
+  return 0
+}
+
 export function messageHeaderOverlap({ header, scroll, message }) {
   const clipTop = Math.max(message.top, scroll.top)
   const clipBottom = Math.min(message.bottom, scroll.bottom)
