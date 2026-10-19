@@ -171,15 +171,21 @@ test('mobile layout follows the visual viewport when an on-screen keyboard opens
 
 test('a successful update hides the stage name and a settings dialog is recognized', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
-  const { showUpdateStage, openedDialog } = await clientExports()
+  const { showUpdateStage, openedDialog, drawerDialogKeepsDrawer } = await clientExports()
   assert.equal(showUpdateStage({ status: 'applied', result: { stage: 'enable' } }), false)
   assert.equal(showUpdateStage({ status: 'failed', result: { stage: 'enable' } }), true)
   assert.equal(showUpdateStage({ status: 'applied' }), false)
   assert.equal(source.includes('scrollIntoView'), false)
   assert.equal(source.includes('position:sticky'), false)
-  const dialog = { nodeType: 1, matches: () => false, querySelector: selector => selector.includes('role=dialog') ? {} : null }
-  assert.equal(openedDialog(dialog), true)
+  const probe = present => ({ nodeType: 1, matches: () => false, querySelector: selector => present(selector) ? {} : null })
+  assert.equal(openedDialog(probe(selector => selector.includes('[role=dialog][aria-modal="true"]'))), true)
+  assert.equal(openedDialog(probe(selector => selector.includes('[data-shortcut-modal=settings]'))), true)
+  assert.equal(openedDialog(probe(selector => selector === '[role=dialog]')), false)
   assert.equal(openedDialog({ nodeType: 3 }), false)
+  assert.equal(drawerDialogKeepsDrawer({ settings: true, modal: true, fromDrawer: true }), false)
+  assert.equal(drawerDialogKeepsDrawer({ modal: true, fromDrawer: true }), true)
+  assert.equal(drawerDialogKeepsDrawer({ modal: true, focusInSidebar: true }), true)
+  assert.equal(drawerDialogKeepsDrawer({ modal: true }), false)
 })
 
 test('a modal, a route change, or Escape closes an open drawer once', async () => {
@@ -211,7 +217,9 @@ test('the plugin registers its dictionary and does not define ja', async () => {
   assert.equal(source.includes('addLanguage'), false)
   assert.match(source, /ctx\.locale\.register\(NS, copy\)/)
   const check = await readFile(new URL('../scripts/browser-check.mjs', import.meta.url), 'utf8')
-  assert.match(check, /addLanguage\(\{ id: 'ja', label: '日本語', fallback: 'en' \}\)/)
+  assert.equal(check.includes('addLanguage'), false)
+  assert.match(check, /dsh-japanese/)
+  assert.match(check, /setLocale\('ja'\)/)
 })
 
 test('a conversation header menu replaces the fallback toolbar only while mounted', async () => {

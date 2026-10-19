@@ -29,16 +29,19 @@ const modelUrl = `http://127.0.0.1:${stub.address().port}`
 const env = { ...process.env, DSH_HOME: world, DSH_TELEMETRY_MODE: 'DISABLED', DEEPSEEK_API_KEY: 'pwa-smoke-fixture-key', DEEPSEEK_BASE_URL: modelUrl, DEEPSEEK_SEARCH_BASE_URL: 'http://127.0.0.1:9' }
 const manifest = JSON.parse(await readFile('package.json', 'utf8'))
 const source = process.argv[2] ?? resolve(`dsh-pwa-${manifest.version}.tgz`)
+// Japanese UI comes from dsh-japanese 0.2.3 (84776d7). The test only selects ja; it does not define it.
+const japanese = process.argv[3] ?? process.env.DSH_JAPANESE_SOURCE ?? 'github:Aero123421/dsh-japanese#84776d736e1020b950135c95cf16b33ff1e2a092'
 const profile = 'pwa-update-smoke'
 function command(args) {
   const result = spawnSync('dsh', args, { env, encoding: 'utf8', timeout: 240000 })
   if (result.status !== 0) { void writeFile(join(world, 'command.log'), result.stdout + result.stderr); throw new Error(`DSH command failed; evidence ${world}`) }
 }
 command(['--profile', profile, '--from-default-profile', 'web', '--dump-config'])
+command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', japanese])
 command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', source])
 const profileFile = join(world, 'profiles', profile, 'package.json')
 const settings = JSON.parse(await readFile(profileFile, 'utf8'))
-settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-pwa'])]
+settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-japanese', 'dsh-pwa'])]
 await writeFile(profileFile, JSON.stringify(settings, null, 2))
 let browser
 try {
@@ -92,10 +95,11 @@ try {
       await page.waitForFunction(() => !!window.__pwaTestContext)
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        const ja = locale.getSnapshot().locales.find(language => language.id === 'ja')
+        if (!ja || ja.label !== '日本語') throw new Error('dsh-japanese did not register ja')
         locale.setLocale('ja')
       })
-      const onboarding = page.getByRole('button', { name: 'Configure later', exact: true })
+      const onboarding = page.getByRole('button', { name: /^(Configure later|あとで設定)$/ })
       if (await onboarding.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await onboarding.click()
       // The account launcher replaces the sidebar Settings button. Its accessible
       // name is "Account menu" and the visible label is More. Settings is a
@@ -106,9 +110,9 @@ try {
           await direct.click()
           return
         }
-        const trigger = page.getByRole('button', { name: /^(Account menu|账号菜单)$/ }).filter({ visible: true })
+        const trigger = page.getByRole('button', { name: /^(Account menu|账号菜单|アカウントメニュー)$/ }).filter({ visible: true })
         if (await trigger.count()) await trigger.click()
-        else await page.locator('button:visible').filter({ hasText: /^(More|更多)$/ }).click()
+        else await page.locator('button:visible').filter({ hasText: /^(More|更多|詳細)$/ }).click()
         await page.getByRole('menuitem', { name: /^(Settings|設定|设置)$/ }).click()
       }
       await openSettings()
@@ -172,7 +176,7 @@ try {
         if (plain !== '') throw new Error('unmarked Japanese notes were shown outside ja')
         host?.__pwaNotesRoot?.unmount(); host?.remove()
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
         locale.setLocale('ja')
       })
       const check = panel.getByRole('button', { name: '更新を確認', exact: true })
@@ -251,7 +255,7 @@ try {
       assert.equal(await page.locator('.dsh-pwa-menu').count(), 0)
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
         locale.setLocale('ja')
       })
       await openSettings()
@@ -272,6 +276,19 @@ try {
       }
       await page.setViewportSize({ width: 390, height: 900 })
       await drawer()
+      await page.evaluate(() => {
+        const dialog = document.createElement('div')
+        dialog.id = 'pwa-non-modal-dialog'
+        dialog.setAttribute('role', 'dialog')
+        document.body.append(dialog)
+      })
+      const nonModal = await page.evaluate(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return { collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'), scrim: !!document.querySelector('.dsh-pwa-scrim') }
+      })
+      assert.equal(nonModal.collapsed, false, 'a dialog without aria-modal does not close the drawer')
+      assert.equal(nonModal.scrim, true)
+      await page.evaluate(() => document.getElementById('pwa-non-modal-dialog')?.remove())
       await page.keyboard.press('Escape'); await menu.waitFor()
       await drawer()
       await openSettings()
@@ -297,8 +314,8 @@ try {
       // The header menu is behind the open drawer; the backdrop closes it.
       const scrim = page.getByRole('button', { name: 'サイドバーの背景を閉じる', exact: true })
       await scrim.click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).first().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).first().click(); await menu.waitFor()
       assert.equal(await page.locator('.dsh-pwa-toolbar').count(), 0, 'conversation views use the header menu, not the fallback toolbar')
       assert.equal(await page.locator('[data-conversation-header-leading] .dsh-pwa-menu-inline').count(), 1)
       // A normal-priority plugin must coexist with our fallback header contribution.
@@ -317,11 +334,11 @@ try {
       await page.evaluate(() => { window.__pwaOtherHeaderDispose(); delete window.__pwaOtherHeaderDispose })
       await page.locator('.dsh-pwa-menu-inline').waitFor()
       await page.locator('.dsh-pwa-toolbar').waitFor({ state: 'hidden' })
-      await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: 'プラグイン', exact: true }).click(); await menu.waitFor()
       await page.locator('.dsh-pwa-toolbar').waitFor()
       assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile-toolbar')), true, 'pages without a conversation header keep the toolbar')
-      await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: 'プラグイン', exact: true }).click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
       const id = await page.evaluate(async cwd => {
         const ctx = window.__pwaTestContext, workspace = await ctx.get('workspaces').create({ path: cwd })
         const id = await ctx.get('sessions').create({ workspaceId: workspace.workspaceId })
@@ -336,6 +353,48 @@ try {
         await page.locator('[data-composer-input]').fill('Show the fixture table.')
         await page.locator('[data-composer-input]').press('Enter')
         await page.getByText('End of fixture reply.', { exact: true }).waitFor({ timeout: 30000 })
+        await drawer()
+        await page.evaluate(sessionId => {
+          const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
+          const button = [...row.querySelectorAll('button')].find(item => /の操作$/.test(item.getAttribute('aria-label') ?? ''))
+          if (!button) throw new Error('session actions button missing')
+          button.click()
+        }, id)
+        await page.getByRole('menuitem', { name: '名前を変更', exact: true }).click()
+        await page.locator('[role=dialog][aria-modal="true"]').waitFor()
+        const rename = await page.evaluate(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const dialog = document.querySelector('[role=dialog][aria-modal="true"]')
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            settings: !!document.querySelector('[data-shortcut-modal=settings]'),
+            modal: dialog?.getAttribute('aria-modal') ?? '',
+          }
+        })
+        assert.equal(rename.settings, false, 'the rename dialog is not the settings screen')
+        assert.equal(rename.modal, 'true', 'the rename dialog is modal')
+        assert.equal(rename.collapsed, false, 'a rename dialog opened from the drawer leaves the drawer open')
+        assert.equal(rename.scrim, true, 'the drawer scrim stays while the rename dialog is open')
+        await page.screenshot({ path: join(world, 'drawer-rename-dialog.png'), animations: 'disabled' })
+        await page.keyboard.press('Escape')
+        await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal="true"]'))
+        const restored = await page.evaluate(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const sidebar = document.querySelector('[data-slot=sidebar]')
+          const active = document.activeElement
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            connected: active instanceof HTMLElement && active.isConnected,
+            inSidebar: !!(sidebar && active && sidebar.contains(active)),
+          }
+        })
+        assert.equal(restored.collapsed, false, 'closing the rename dialog leaves the drawer open')
+        assert.equal(restored.scrim, true)
+        assert.equal(restored.connected, true, 'the rename dialog still has a connected focus target')
+        assert.equal(restored.inSidebar, true, 'focus returns inside the drawer')
+        await scrim.click(); await menu.waitFor()
         const table = page.locator('[data-conversation-content] .md-table-wide').first()
         await table.scrollIntoViewIfNeeded()
         assert.equal(await table.evaluate(el => getComputedStyle(el).overflowX), 'auto', 'wide tables scroll on touch screens without hover')
@@ -343,7 +402,7 @@ try {
         await page.screenshot({ path: join(world, 'mobile-table.png'), animations: 'disabled' })
       }
       const panelToggle = page.locator('[data-sidebar-right-panel][data-sidebar-right-open] button[data-sidebar-right-toggle]')
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
       await page.waitForFunction(() => { const p = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]'); return p && p.getBoundingClientRect().right <= innerWidth + 1 })
       const right = await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').boundingBox()
@@ -351,9 +410,9 @@ try {
       await page.screenshot({ path: join(world, 'mobile-right-panel.png'), animations: 'disabled' })
       await panelToggle.click()
       await page.waitForFunction(() => !window.__pwaTestContext.get('sidebarRight').isExpanded())
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
-      await page.getByText('Workspace files', { exact: true }).click()
+      await page.getByText('ワークスペースのファイル', { exact: true }).click()
       await page.locator('[data-sidebar-right-panel] button[data-sidebar-right-toggle]').click()
       await menu.waitFor()
       await page.screenshot({ path: join(world, 'mobile-conversation.png'), animations: 'disabled' })
@@ -363,7 +422,7 @@ try {
       assert.equal(await page.locator('[data-slot=root]>div>div[data-side]').first().evaluate(el => getComputedStyle(el).display), 'none')
       await page.screenshot({ path: join(world, `mobile-drawer-dark-${restart}.png`), animations: 'disabled' })
       await scrim.click(); await menu.waitFor()
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
       assert.equal(await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').evaluate(el => getComputedStyle(el).animationName), 'none')
       await page.screenshot({ path: join(world, `mobile-right-dark-${restart}.png`), animations: 'disabled' })
@@ -459,7 +518,7 @@ try {
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via dsh-japanese 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'rename dialog keeps the drawer, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }

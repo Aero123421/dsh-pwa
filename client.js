@@ -488,34 +488,58 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const info = ctx.get?.('layout')?.panelInfo
       let panel = info?.getSnapshot().activePanelId
       const offPanel = info?.subscribe(() => { const next = info.getSnapshot().activePanelId; if (next !== panel) { panel = next; close() } })
+      // A menu portaled out of the sidebar is still a drawer action (rename, confirm).
+      let fromDrawer = false
+      let dialogFromDrawer = false
+      const noteDrawerGesture = event => {
+        fromDrawer = !!event.target?.closest?.('[data-slot=sidebar], [role=menu]')
+      }
+      const focusInSidebar = () => {
+        const sidebar = document.querySelector('[data-slot=sidebar]')
+        return !!(sidebar && document.activeElement && sidebar.contains(document.activeElement))
+      }
       const onClick = event => {
+        noteDrawerGesture(event)
         const target = event.target
         if (!target.closest?.('[data-slot=sidebar]')) return
         const newSession = target.closest('button')?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
         const nav = target.closest('nav button')
         const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
-        if (newSession || nav || session) { clearTimeout(timer); timer = setTimeout(close) }
+        // The second click of a title double-click opens rename. Leave the drawer up.
+        if (event.detail > 1) { clearTimeout(timer); return }
+        if (newSession || nav) { clearTimeout(timer); timer = setTimeout(close) }
+        else if (session) { clearTimeout(timer); timer = setTimeout(close, 400) }
       }
       const onDialog = node => {
         if (!openedDialog(node)) return
+        if (drawerDialogKeepsDrawer({ settings: settingsDialog(node), modal: true, fromDrawer, focusInSidebar: focusInSidebar() })) {
+          dialogFromDrawer = true
+          clearTimeout(timer)
+          return
+        }
+        dialogFromDrawer = false
         if (drawerShouldClose({ open: isOpen(), modal: true })) close()
       }
       const onKey = event => {
         if (event.key !== 'Escape') return
         const modal = !!document.querySelector('[role=dialog][aria-modal="true"]')
         const menuOpen = !!document.querySelector('[role=menu]')
-        // The dialog's own listener still receives Escape, so one key closes both.
+        // Settings still closes with the drawer. A dialog opened from the drawer stays, so focus can return.
         if (modal) {
-          if (drawerShouldClose({ open: isOpen(), modal: true })) close()
+          if (!dialogFromDrawer && drawerShouldClose({ open: isOpen(), modal: true })) close()
           return
         }
         if (menuOpen || event.defaultPrevented) return
         if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
+      document.addEventListener('pointerdown', noteDrawerGesture, true)
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
       const onBody = records => {
-        for (const record of records) for (const node of record.addedNodes) onDialog(node)
+        for (const record of records) {
+          for (const node of record.addedNodes) onDialog(node)
+          for (const node of record.removedNodes) if (openedDialog(node)) dialogFromDrawer = false
+        }
       }
       const bodyWatch = new MutationObserver(onBody)
       bodyWatch.observe(document.body, { childList: true })
@@ -538,11 +562,11 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       }
       window.addEventListener('popstate', onRoute)
       window.addEventListener('hashchange', onRoute)
-      if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) })) close()
+      if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) && !drawerDialogKeepsDrawer({ settings: settingsDialog(document.body), modal: true, focusInSidebar: focusInSidebar() }) })) close()
       sync()
       return () => {
         clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
-        document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
+        document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
         if (pushState && history.pushState !== pushState) history.pushState = pushState
         if (replaceState && history.replaceState !== replaceState) history.replaceState = replaceState
@@ -566,10 +590,20 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
       h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
   }
-  /** Settings or any dialog, including one that is nested in a newly added portal. */
+  const DRAWER_CLOSE_DIALOG = '[data-shortcut-modal=settings], [role=dialog][aria-modal="true"]'
+  /** Settings, or a modal dialog. A dialog without aria-modal does not close the drawer. */
   function openedDialog(node) {
     if (!node || node.nodeType !== 1) return false
-    return node.matches?.('[data-shortcut-modal=settings], [role=dialog]') || !!node.querySelector?.('[data-shortcut-modal=settings], [role=dialog]')
+    return node.matches?.(DRAWER_CLOSE_DIALOG) || !!node.querySelector?.(DRAWER_CLOSE_DIALOG)
+  }
+  function settingsDialog(node) {
+    if (!node || node.nodeType !== 1) return false
+    return node.matches?.('[data-shortcut-modal=settings]') || !!node.querySelector?.('[data-shortcut-modal=settings]')
+  }
+  /** A confirmation or rename dialog opened from the drawer keeps it, so focus can return. Settings still closes it. */
+  function drawerDialogKeepsDrawer({ settings = false, modal = false, fromDrawer = false, focusInSidebar = false } = {}) {
+    if (settings || !modal) return false
+    return fromDrawer || focusInSidebar
   }
   /** A finished update has no manager stage name. Other results may still show one. */
   function showUpdateStage(state) {
@@ -709,5 +743,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
 } })
