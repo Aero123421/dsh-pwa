@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
+import { headerBackgroundOpaque, messageHeaderOverlap } from './landscape-overlap.mjs'
 const world = await mkdtemp(join(tmpdir(), 'dsh-pwa-smoke-'))
 // Local Anthropic-format stub: one fixed Markdown reply with a wide table. No model API is called.
 const reply = '| Column A | Column B | A much longer column C | Column D |\n| --- | --- | --- | --- |\n| 1 | value | a long cell that needs more than the narrow phone width | ok |\n\nEnd of fixture reply.'
@@ -288,15 +289,78 @@ try {
       if (restart === 0) {
         // Auto mode treats a touch phone in landscape as mobile even though it is wider than 767px.
         const phone = await browser.newContext({ locale: 'ja-JP', viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true })
+        await phone.addInitScript(() => {
+          let current
+          Object.defineProperty(window, '__ModuleLoader__', { configurable: true, get: () => current, set(value) {
+            current = value
+            let load = value.load
+            Object.defineProperty(value, 'load', { configurable: true, get: () => function(registration) {
+              if (registration.id === 'dsh-pwa') {
+                const factory = registration.factory
+                registration = { ...registration, factory(require) {
+                  const exports = factory(require), original = exports.apply
+                  exports.apply = ctx => { window.__pwaTestContext = ctx; return original(ctx) }
+                  return exports
+                } }
+              }
+              return load.call(value, registration)
+            }, set(fn) { load = fn } })
+          } })
+        })
         try {
           const landscape = await phone.newPage()
           landscape.on('pageerror', error => errors.push(error.message))
           await landscape.goto(url)
+          await landscape.waitForFunction(() => window.__pwaTestContext?.get('sessions')?.list.getSnapshot().phase === 'ready')
+          const landscapeNotice = landscape.getByRole('button', { name: /Continue|继续|続ける/ }).first()
+          if (await landscapeNotice.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false)) await landscapeNotice.click()
+          await landscape.evaluate(sessionId => window.__pwaTestContext.get('uiWorkspace').openSession(sessionId), id)
+          await landscape.locator('[data-chat-flow-kind=user]').first().waitFor()
           await landscape.waitForFunction(() => document.documentElement.hasAttribute('data-dsh-mobile'))
-          await landscape.locator('.dsh-pwa-menu').first().waitFor()
-          const center = await landscape.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
-          assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - 844) < 1, 'single-column shell in landscape')
-          await landscape.screenshot({ path: join(world, 'mobile-landscape.png'), animations: 'disabled' })
+          for (const [width, height] of [[844, 390], [667, 375]]) {
+            await landscape.setViewportSize({ width, height })
+            await landscape.waitForFunction(() => document.documentElement.hasAttribute('data-dsh-mobile') && matchMedia('(pointer: coarse)').matches && matchMedia('(max-height: 500px)').matches)
+            await landscape.locator('.dsh-pwa-menu').first().waitFor()
+            const center = await landscape.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
+            assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - width) < 1, `single-column shell in landscape ${width}x${height}`)
+            const samples = await landscape.evaluate(() => {
+              const headerEl = document.querySelector('[data-slot="conversation.header"] > header')
+              const scrollEl = document.querySelector('[data-conversation-scroll]')
+              const box = el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }
+              const shots = []
+              for (const top of [0, 48, scrollEl.scrollHeight]) {
+                scrollEl.scrollTop = top
+                shots.push({
+                  header: box(headerEl),
+                  scroll: box(scrollEl),
+                  messages: [...document.querySelectorAll('[data-chat-flow-kind]')].map(box),
+                  background: getComputedStyle(headerEl).backgroundColor,
+                })
+              }
+              scrollEl.scrollTop = 48
+              const header = headerEl.getBoundingClientRect()
+              const title = headerEl.querySelector('nav')?.getBoundingClientRect().width ?? 0
+              const buttons = [...headerEl.querySelectorAll('button')].filter(button => !button.closest('[data-conversation-tabs]') && !button.classList.contains('dsh-pwa-menu')).map(button => button.getBoundingClientRect().width)
+              return { shots, title, standard: Math.max(0, ...buttons), headerHeight: header.height }
+            })
+            assert.ok(samples.headerHeight <= 48, `landscape header stays one row at ${width}px: ${samples.headerHeight}`)
+            assert.ok(samples.title >= 80, `session title keeps its width at ${width}px: ${samples.title}`)
+            assert.ok(samples.standard >= 28, `Standard mode keeps its width at ${width}px: ${samples.standard}`)
+            for (const shot of samples.shots) {
+              const headerOpaque = headerBackgroundOpaque(shot.background)
+              for (const message of shot.messages) {
+                const area = messageHeaderOverlap({ header: shot.header, scroll: shot.scroll, message, headerOpaque })
+                assert.equal(area, 0, `header overlaps a message at ${width}x${height} (opaque ${headerOpaque})`)
+              }
+            }
+            const tabs = landscape.locator('[data-conversation-tabs] [role=tab]')
+            assert.equal(await tabs.count(), 2)
+            await tabs.nth(1).click()
+            await landscape.waitForFunction(() => document.querySelectorAll('[data-conversation-tabs] [role=tab]')[1]?.getAttribute('aria-selected') === 'true')
+            await tabs.nth(0).click()
+            await landscape.waitForFunction(() => document.querySelectorAll('[data-conversation-tabs] [role=tab]')[0]?.getAttribute('aria-selected') === 'true')
+            await landscape.screenshot({ path: join(world, `mobile-landscape-${width}x${height}.png`), animations: 'disabled' })
+          }
         } finally { await phone.close() }
       }
       assert.equal(errors.length, 0, errors.join('\n'))
@@ -307,7 +371,7 @@ try {
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'wide table scroll, landscape phone, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }

@@ -169,6 +169,33 @@ test('mobile layout follows the visual viewport when an on-screen keyboard opens
   mobile.dispose(); assert.equal(viewport.listeners.size, 0)
 })
 
+test('successful updates do not show the manager stage; failures still do', async () => {
+  const { showUpdateStage } = await clientExports()
+  assert.equal(showUpdateStage({ status: 'applied', result: { stage: 'enable' } }), false)
+  assert.equal(showUpdateStage({ status: 'restart-required', result: { stage: 'install' } }), false)
+  assert.equal(showUpdateStage({ status: 'failed', result: { stage: 'install', error: { code: 'dsh-pwa/network' } } }), true)
+  assert.equal(showUpdateStage({ status: 'unknown', result: { stage: 'remove' } }), true)
+  assert.equal(showUpdateStage({ status: 'failed', result: {} }), false)
+})
+
+test('a width change scrolls the selected settings item into the nav strip', async () => {
+  const { revealSelectedSettingsNav } = await clientExports()
+  const scroller = { scrollLeft: 0, scrollWidth: 800, clientWidth: 200, getBoundingClientRect: () => ({ left: 0, right: 200, width: 200 }) }
+  const selected = { parentElement: scroller, getBoundingClientRect: () => ({ left: 240, right: 360 }) }
+  assert.equal(revealSelectedSettingsNav(selected), true)
+  assert.equal(scroller.scrollLeft, 160)
+  scroller.scrollLeft = 40
+  const visible = { parentElement: scroller, getBoundingClientRect: () => ({ left: 20, right: 90 }) }
+  assert.equal(revealSelectedSettingsNav(visible), false)
+  assert.equal(scroller.scrollLeft, 40)
+  assert.equal(revealSelectedSettingsNav(null), false)
+})
+
+test('the client does not define the ja language', async () => {
+  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  assert.equal(source.includes('addLanguage'), false)
+})
+
 test('a conversation header menu replaces the fallback toolbar only while mounted', async () => {
   const { MobileController } = await clientExports()
   const html = styledRoot()

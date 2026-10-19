@@ -358,7 +358,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} [data-conversation-header-leading]:empty{display:none}
     ${M} [data-conversation-tabs]{margin-top:2px;padding-left:10px;gap:28px}
     @media (min-width:560px) and (max-height:500px){
-      ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto}
+      ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto;position:relative;z-index:5;isolation:isolate;background:var(--dsw-alias-bg-base)}
       ${M} ${HEADER} [data-conversation-tabs]{grid-column:3;grid-row:1;align-self:end;margin:0 0 0 16px;padding-left:0}
     }
     ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
@@ -480,10 +480,39 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       }
       document.addEventListener('click', onClick, true)
       document.addEventListener('keydown', onKey)
+      // A portaled dialog is a direct child of body. Streaming transcript nodes are not.
+      const onBody = records => {
+        for (const record of records) {
+          for (const node of record.addedNodes) {
+            if (node.nodeType !== 1) continue
+            if (node.getAttribute?.('role') === 'dialog' || node.querySelector?.('[role=dialog]')) {
+              if (isOpen()) close()
+            }
+          }
+        }
+        revealSelectedSettingsNav(document.querySelector(`${SETTINGS} nav button[aria-current="true"]`))
+      }
+      const bodyWatch = new MutationObserver(onBody)
+      bodyWatch.observe(document.body, { childList: true })
+      let navScroller
+      const revealNav = () => revealSelectedSettingsNav(navScroller?.querySelector('button[aria-current="true"]') ?? document.querySelector(`${SETTINGS} nav button[aria-current="true"]`))
+      const navSize = new ResizeObserver(revealNav)
+      const attachNav = () => {
+        const scroller = document.querySelector(`${SETTINGS} nav button[aria-current="true"]`)?.parentElement
+        if (scroller && scroller !== navScroller) { navSize.disconnect(); navScroller = scroller; navSize.observe(scroller) }
+        revealNav()
+      }
+      attachNav()
+      const onResize = () => attachNav()
+      window.addEventListener('resize', onResize)
+      window.visualViewport?.addEventListener('resize', onResize)
+      if (document.querySelector('[role=dialog]') && isOpen()) close()
       sync()
       return () => {
-        clearTimeout(timer); watch.disconnect(); offPanel?.()
+        clearTimeout(timer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); navSize.disconnect()
         document.removeEventListener('click', onClick, true); document.removeEventListener('keydown', onKey)
+        window.removeEventListener('resize', onResize)
+        window.visualViewport?.removeEventListener('resize', onResize)
         for (const [el, inert] of originalInert) el.inert = inert
       }
     }, [active, ctx, locale, mobile])
@@ -504,6 +533,22 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
       h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
   }
+  /** Scroll the selected settings item into the horizontal nav. No-op when it is already visible. */
+  function revealSelectedSettingsNav(selected) {
+    const scroller = selected?.parentElement
+    if (!selected || !scroller) return false
+    const item = selected.getBoundingClientRect()
+    const view = scroller.getBoundingClientRect()
+    if (!(view.width > 0) || scroller.scrollWidth <= scroller.clientWidth + 1) return false
+    if (item.left < view.left) { scroller.scrollLeft -= view.left - item.left; return true }
+    if (item.right > view.right) { scroller.scrollLeft += item.right - view.right; return true }
+    return false
+  }
+  /** Successful updates keep the internal manager stage out of the settings page. */
+  function showUpdateStage(state) {
+    if (!state?.result?.stage) return false
+    return state.status !== 'applied' && state.status !== 'restart-required'
+  }
   function UpdateUI({ controller, locale }) {
     const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot)
     const t = locale.bind(NS)
@@ -522,7 +567,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         state.status === 'available' && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void controller.begin() } }, t('install')),
         state.status === 'unknown' && h(Button, { size: 'sm', variant: 'outline', onClick: () => { void controller.load() } }, t('reconcile'))),
       h('a', { className: 'dsh-pwa-link', href: 'https://github.com/Aero123421/dsh-pwa/releases', target: '_blank', rel: 'noopener noreferrer' }, t('manual')),
-      state.result?.stage && h('p', { className: 'dsh-pwa-desc' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
+      showUpdateStage(state) && h('p', { className: 'dsh-pwa-desc' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
       h('p', { className: 'dsh-pwa-desc' }, t('hint')))
   }
   function SettingsUI({ controller, mobile, install, locale }) {
@@ -567,5 +612,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, showUpdateStage, revealSelectedSettingsNav }
 } })

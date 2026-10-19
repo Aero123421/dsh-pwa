@@ -95,7 +95,7 @@ Open **Settings → PWA & Mobile → Mobile layout** and choose:
 The choice is saved in that browser's `localStorage` only, so a phone and a desktop can differ. In mobile layout:
 
 - DSH's existing UI and session state are kept. The frame becomes a single full-width content column, without translating the conversation out of view.
-- In a conversation, the menu button sits in DSH's official `conversation.header.leading` seat, before the Session title, so the screen keeps one compact header. Pages without a conversation header (Plugins, Automation tasks) get a separate top bar with the same button. In landscape, the Chat/Trajectory tabs move onto the title row.
+- In a conversation, the menu button sits in DSH's official `conversation.header.leading` seat, before the Session title, so the screen keeps one compact header. Pages without a conversation header (Plugins, Automation tasks) get a separate top bar with the same button. In landscape, the Chat/Trajectory tabs move onto the title row. That row keeps the page background and sits above the transcript, so a scrolled message does not paint through the title, Standard mode, or the tabs.
 - The left sidebar overlays the conversation. The backdrop, Escape, or choosing a session, panel or New Session closes it; on pages with the separate top bar, its menu button also closes it. Hidden background controls are inert while it is open.
 - The right panel (files, terminal…) uses the whole phone width and closes with its own panel button.
 - Wide Markdown tables scroll sideways with a finger. Stock DSH shows their scrollbar only on mouse hover, so the right-hand columns were unreachable on a touch screen.
@@ -117,9 +117,9 @@ Before `removeBundle`, the updater keeps the installed spec and enabled state. A
 
 Operation IDs are saved before the first request. The Host stores only update metadata/results under the current profile's `.dsh-pwa-updates/`, so reconnecting browsers and replacement plugin instances reconcile the original operation. An unknown result is never automatically resubmitted. Disabled bundle selection is preserved, and an installed newer version is never downgraded by the updater.
 
-Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The any-purpose icons stay at `./pwa/icon-192.png` and `./pwa/icon-512.png`. The manifest also publishes `./pwa/icon-192-maskable.png` and `./pwa/icon-512-maskable.png` for Android adaptive icons. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language.
+Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The any-purpose icons stay at `./pwa/icon-192.png` and `./pwa/icon-512.png`. The manifest also publishes `./pwa/icon-192-maskable.png` and `./pwa/icon-512-maskable.png` for Android adaptive icons. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It respects the selected UI language. 日本語の表示には [dsh-japanese](https://github.com/Aero123421/dsh-japanese) が必要です。 This plugin registers its `ja` dictionary and does not define the `ja` language. Without dsh-japanese, ja-JP and zh-CN show the English copy rather than message keys.
 
-[Current release notes](docs/release-0.4.0.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
+[Current release notes](docs/release-0.4.2.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
 
 ## Test
 
