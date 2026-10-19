@@ -16,11 +16,11 @@ The settings page is shown as **PWA & Mobile**. The package, bundle and plugin I
 - No service worker, build step, external server, or new runtime dependency. The updater uses `semver` for the same prerelease-inclusive peer check DSH uses
 - Uses official Cordis WebServer hooks; leaves DSH files untouched
 - English/Japanese update controls and a profile-owned installation journal
-- Mobile layout switch (Auto / On / Off): a dedicated header, overlay sidebar, full-width conversation and right panel, and narrow-screen Settings
+- Mobile layout switch (Auto / On / Off): menu button in the conversation header, overlay sidebar, full-width conversation and right panel, scrollable wide tables, keyboard-aware height, landscape safe areas, and narrow-screen Settings
 
 ## Installation
 
-Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The revised mobile layout is checked against the published **0.2.1-alpha.3** package; see [verification scope](docs/mobile-pwa-verification.md) for the upstream source revision and limits.
+Requires a compatible [DeepSeek Harness Web](https://deepseek-harness.github.io/deepseek-harness/) build exposing `ctx.webServer.register()` and `webserver/index-inject`. The optional peer `@deepseek-ai/dsh-app-boot` is `>=0.2.1-alpha.2 <0.3.0-0`. That includes DSH 0.2.1-alpha.2, 0.2.1-alpha.3, and later 0.2.x releases, including prereleases. The range ends before `0.3.0-0`. The lower bound is 0.2.1-alpha.2, the API this plugin was written against; `0.2.0-rc.2` is older than that API. The mobile layout is checked against the published **0.2.1-alpha.3** and **0.2.1-rc.2** packages; see [verification scope](docs/mobile-pwa-verification.md) for the upstream source revision and limits.
 
 Install directly from GitHub into the **web** profile:
 
@@ -88,20 +88,22 @@ dsh plugin --profile web remove -w dsh-pwa
 
 Open **Settings → PWA & Mobile → Mobile layout** and choose:
 
-- **Auto** (default): mobile layout on screens narrower than 768px.
+- **Auto** (default): mobile layout on screens narrower than 768px, and on touch screens no taller than 500px (phones in landscape).
 - **On**: always, for example on an iPad.
 - **Off**: the stock DSH layout.
 
 The choice is saved in that browser's `localStorage` only, so a phone and a desktop can differ. In mobile layout:
 
 - DSH's existing UI and session state are kept. The frame becomes a single full-width content column, without translating the conversation out of view.
-- The left sidebar overlays the conversation. A dedicated header button, the backdrop, Escape, or choosing a session, panel or New Session closes it. Hidden background controls are inert while it is open.
-- The right panel (files, terminal…) uses the whole phone width. The header close button invokes the existing panel control so its state remains synchronized.
-- Inputs use at least 16px text; safe-area insets and the visual viewport height are respected. OS keyboard behavior still needs real-device verification.
-- Settings places a horizontally scrollable navigation strip above its content. The dialog, close button and content scrolling fit narrow screens.
+- In a conversation, the menu button sits in DSH's official `conversation.header.leading` seat, before the Session title, so the screen keeps one compact header. Pages without a conversation header (Plugins, Automation tasks) get a separate top bar with the same button. In landscape, the Chat/Trajectory tabs move onto the title row.
+- The left sidebar overlays the conversation. The backdrop, Escape, or choosing a session, panel or New Session closes it; on pages with the separate top bar, its menu button also closes it. Hidden background controls are inert while it is open.
+- The right panel (files, terminal…) uses the whole phone width and closes with its own panel button.
+- Wide Markdown tables scroll sideways with a finger. Stock DSH shows their scrollbar only on mouse hover, so the right-hand columns were unreachable on a touch screen.
+- Inputs use at least 16px text. The app follows the visual viewport: when an on-screen keyboard opens, the app shrinks to the visible area and moves with it, and the bottom safe-area gap under the composer is dropped. Left and right safe areas (the notch in landscape) are kept clear. OS keyboard behavior still needs real-device verification.
+- Settings puts its title, actions and close button on one row, with a horizontally scrollable navigation strip below. The PWA & Mobile section uses the same text sizes and colors as the built-in settings rows.
 - DOM observation is limited to the frame state and right panel rather than every streaming conversation update.
 
-Mobile CSS is scoped under `html[data-dsh-mobile]` and the controls use the official `shell.overlay` slot; no DSH file is changed. The rules target slot markers, data attributes and their direct wrappers rather than generated class names. This remains an internal DOM dependency, checked against **0.2.1-alpha.3** — switch to **Off** if a future DSH release changes that structure. [Root causes and verification notes](docs/mobile-pwa-verification.md).
+Mobile CSS is scoped under `html[data-dsh-mobile]`, and the controls use the official `conversation.header.leading` and `shell.overlay` slots; no DSH file is changed. The rules target slot markers, data attributes, the stable `md-table-wide` class and direct wrappers rather than generated class names. This remains an internal DOM dependency, checked against **0.2.1-alpha.3** and **0.2.1-rc.2** — switch to **Off** if a future DSH release changes that structure. [Root causes and verification notes](docs/mobile-pwa-verification.md).
 
 ## Plugin updates
 
@@ -134,9 +136,9 @@ npm run test:browser
 
 `npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
 
-Node's built-in runner checks the mobile mode store, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
+Node's built-in runner checks the mobile mode store, the landscape and keyboard viewport handling, the header-menu/top-bar switch, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
 
-The Playwright smoke installs the packed package into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, drawers and reselection, files, composer text size, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese is registered only in the test context, and fixture provider credentials prevent model API calls.
+The Playwright smoke installs the packed package into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, the header menu and the top-bar fallback, drawers and reselection, a sideways-scrolling wide table, files, composer text size, a touch phone in landscape, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese is registered only in the test context. Model requests go to a local stub inside the script that returns one fixed Markdown reply; no model API is called.
 
 The separate proxy regression uses the production metadata routes behind a cookie gate at `/ui/` with mobile/touch emulation. It checks the missing-credentials failure as a negative control, then credentialed server discovery and repair of an already open page. It does not connect to a user's proxy or credentials.
 

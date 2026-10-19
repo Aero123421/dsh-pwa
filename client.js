@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.metadata': 'Release files or metadata are missing or invalid.', 'reason.channel': 'Only stable releases are offered.', 'reason.incompatible': 'This release does not support the running DSH version.', 'reason.compatibility-unknown': 'DSH compatibility could not be confirmed.',
       'reason.busy': 'Another update is in progress.', 'reason.redirect': 'A download redirected outside the approved repository.', 'reason.size': 'Release data exceeded the download limit.', 'reason.stale-candidate': 'The candidate or installed bundle changed. Check again.',
       'mobile.title': 'Mobile layout', 'mobile.auto': 'Auto', 'mobile.on': 'On', 'mobile.off': 'Off',
-      'mobile.hint': 'Auto uses the mobile layout on screens narrower than 768px. The choice is saved in this browser only.', 'mobile.active': 'Mobile layout is on in this browser.', 'mobile.inactive': 'Mobile layout is off in this browser.',
+      'mobile.hint': 'Auto uses the mobile layout on screens narrower than 768px and on phones in landscape. The choice is saved in this browser only.', 'mobile.active': 'Mobile layout is on in this browser.', 'mobile.inactive': 'Mobile layout is off in this browser.',
       'mobile.dismiss': 'Dismiss sidebar backdrop', 'mobile.menu': 'Open sidebar', 'mobile.close': 'Close sidebar', 'mobile.closePanel': 'Close panel',
       'reason.release-unavailable': 'No published update release is available.', 'reason.storage': 'The profile update record could not be saved.', 'reason.interrupted': 'Preparation was interrupted before installation. Check again.', 'reason.network': 'The release service or DSH connection could not be reached.',
       'reason.restored': 'The new version did not install. The previous version was installed again. Restart DSH if the plugin does not come back.',
@@ -46,7 +46,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.metadata': '配布ファイルが不足しているか、配布情報が不正です。', 'reason.channel': '正式版だけを更新候補にします。', 'reason.incompatible': 'この配布版は実行中の DSH に対応していません。', 'reason.compatibility-unknown': 'DSH との互換性を確認できません。',
       'reason.busy': '別の更新が進行中です。', 'reason.redirect': '許可していない取得先への転送を拒否しました。', 'reason.size': '配布情報が取得サイズ上限を超えました。', 'reason.stale-candidate': '候補または導入済み bundle が変わりました。再確認してください。',
       'mobile.title': 'モバイル表示', 'mobile.auto': '自動', 'mobile.on': 'オン', 'mobile.off': 'オフ',
-      'mobile.hint': '自動では幅 768px 未満の画面でモバイル表示にします。設定はこのブラウザにだけ保存されます。', 'mobile.active': 'このブラウザではモバイル表示がオンです。', 'mobile.inactive': 'このブラウザではモバイル表示がオフです。',
+      'mobile.hint': '自動では、幅 768px 未満の画面と横向きのスマートフォンでモバイル表示にします。設定はこのブラウザにだけ保存されます。', 'mobile.active': 'このブラウザではモバイル表示がオンです。', 'mobile.inactive': 'このブラウザではモバイル表示がオフです。',
       'mobile.dismiss': 'サイドバーの背景を閉じる', 'mobile.menu': 'サイドバーを開く', 'mobile.close': 'サイドバーを閉じる', 'mobile.closePanel': 'パネルを閉じる',
       'reason.release-unavailable': '公開された更新版を取得できません。', 'reason.storage': 'profile の更新記録を保存できませんでした。', 'reason.interrupted': '導入前の準備が中断されました。再確認してください。', 'reason.network': '配布サービスまたは DSH と通信できませんでした。',
       'reason.restored': '新しい版は導入できませんでした。以前の版を入れ直しました。プラグインが戻らない場合は DSH を再起動してください。',
@@ -155,14 +155,17 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     const state = React.useSyncExternalStore(install.subscribe, install.getSnapshot), t = locale.bind(NS)
     React.useEffect(() => { void install.check() }, [install])
     const status = state.installed ? 'installed' : !state.secure ? 'insecure' : state.check
-    return h('div', { className: 'dsh-pwa-install' },
-      h('div', { className: 'dsh-pwa-identity' }, h('img', { src: './pwa/apple-touch-icon.png', width: 56, height: 56, alt: '' }), h('h4', null, t('pwa.title'))),
-      h('p', { role: status === 'failed' || status === 'insecure' ? 'alert' : 'status' }, t(`pwa.${status}`)),
-      !state.installed && h('p', { className: 'dsh-pwa-muted' }, t(state.ios ? 'pwa.ios' : 'pwa.manual')),
-      state.outcome && h('p', { role: 'status' }, t(`pwa.${state.outcome}`)),
+    return h('div', { className: 'dsh-pwa-group dsh-pwa-install' },
+      h('div', { className: 'dsh-pwa-identity' },
+        h('img', { src: './pwa/apple-touch-icon.png', width: 44, height: 44, alt: '' }),
+        h('div', null,
+          h('h4', { className: 'dsh-pwa-title' }, t('pwa.title')),
+          h('p', { className: 'dsh-pwa-state', role: status === 'failed' || status === 'insecure' ? 'alert' : 'status' }, t(`pwa.${status}`)))),
+      !state.installed && h('p', { className: 'dsh-pwa-desc' }, t(state.ios ? 'pwa.ios' : 'pwa.manual')),
+      state.outcome && h('p', { className: 'dsh-pwa-state', role: 'status' }, t(`pwa.${state.outcome}`)),
       h('div', { className: 'dsh-pwa-actions' },
-        state.prompt && !state.installed && state.secure && h(Button, { variant: 'primary', onClick: () => { void install.install() } }, t('pwa.install')),
-        h(Button, { variant: 'outline', disabled: state.check === 'checking', onClick: () => { void install.check() } }, t('pwa.check'))))
+        state.prompt && !state.installed && state.secure && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void install.install() } }, t('pwa.install')),
+        h(Button, { size: 'sm', variant: 'outline', disabled: state.check === 'checking', onClick: () => { void install.check() } }, t('pwa.check'))))
   }
   class UpdateController {
     constructor(connection, storage) {
@@ -229,20 +232,39 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     dispose() { this.closed = true; this.generation++; clearTimeout(this.timer); this.listeners.clear() }
   }
   /* Mobile layout: stored per browser, applied as one attribute on <html> that scopes every rule below. */
-  const MODES = ['auto', 'on', 'off'], MODE_KEY = 'dsh-pwa:mobile-ui', NARROW = '(max-width: 767px)'
+  const MODES = ['auto', 'on', 'off'], MODE_KEY = 'dsh-pwa:mobile-ui'
+  // Phones in landscape are wider than 767px but too short for the desktop frame.
+  const NARROW = '(max-width: 767px), (max-height: 500px) and (pointer: coarse)'
+  // A visual viewport this much shorter than the window is treated as an open on-screen keyboard.
+  const KEYBOARD_MIN = 120
+  function createStore(state) {
+    const listeners = new Set()
+    return {
+      get: () => state,
+      set(patch) {
+        if (Object.keys(patch).every(key => patch[key] === state[key])) return
+        state = { ...state, ...patch }
+        for (const listener of listeners) listener()
+      },
+      subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener) },
+      clear() { listeners.clear() },
+    }
+  }
   class MobileController {
-    constructor({ storage, matchMedia, root } = {}) {
+    constructor({ storage, matchMedia, root, viewport, view } = {}) {
       if (storage === undefined) { try { storage = globalThis.localStorage } catch {} }
       this.storage = storage; this.root = root ?? globalThis.document?.documentElement; this.listeners = new Set()
+      this.view = view ?? globalThis
+      this.viewport = viewport === undefined ? globalThis.visualViewport : viewport
+      // open: the surface covering the conversation; inline: menu buttons mounted in conversation headers.
+      this.chrome = createStore({ open: null, inline: 0 })
+      this.menus = new Set()
       let mode
       try { mode = storage?.getItem(MODE_KEY) } catch {}
       this.query = (matchMedia ?? globalThis.matchMedia)?.(NARROW)
-      this.viewport = globalThis.visualViewport
-      this.onViewport = () => {
-        if (!this.state?.active || (this.viewport?.scale ?? 1) !== 1) return
-        this.root?.style?.setProperty('--dsh-pwa-viewport', `${Math.round(this.viewport?.height ?? globalThis.innerHeight)}px`)
-      }
-      this.viewport?.addEventListener('resize', this.onViewport)
+      this.onViewport = () => this.measure()
+      this.viewport?.addEventListener?.('resize', this.onViewport)
+      this.viewport?.addEventListener?.('scroll', this.onViewport)
       this.onChange = () => this.update()
       this.query?.addEventListener?.('change', this.onChange)
       this.state = { mode: MODES.includes(mode) ? mode : 'auto', active: false }
@@ -258,52 +280,136 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     update(mode = this.state.mode) {
       const active = mode === 'on' || (mode === 'auto' && !!this.query?.matches)
       this.root?.toggleAttribute?.('data-dsh-mobile', active)
-      if (!active) this.root?.style?.removeProperty('--dsh-pwa-viewport')
-      if (mode === this.state.mode && active === this.state.active) return
-      this.state = { mode, active }; this.onViewport()
+      const changed = mode !== this.state.mode || active !== this.state.active
+      if (changed) this.state = { mode, active }
+      this.measure(); this.syncToolbar()
+      if (!changed) return
+      if (!active) this.chrome.set({ open: null })
       for (const listener of this.listeners) listener()
     }
-    dispose() { this.viewport?.removeEventListener('resize', this.onViewport); this.root?.style?.removeProperty('--dsh-pwa-viewport'); this.query?.removeEventListener?.('change', this.onChange); this.root?.removeAttribute?.('data-dsh-mobile'); this.listeners.clear() }
+    /** Size the app to the visual viewport, which excludes an on-screen keyboard. */
+    measure() {
+      const style = this.root?.style, viewport = this.viewport
+      if (!style) return
+      if (!this.state?.active || !viewport) {
+        style.removeProperty('--dsh-pwa-viewport'); style.removeProperty('--dsh-pwa-shift')
+        this.root.removeAttribute?.('data-dsh-mobile-keyboard')
+        return
+      }
+      // Pinch zoom also moves the visual viewport; keep the last unzoomed frame.
+      if (Math.abs((viewport.scale ?? 1) - 1) > 0.01) return
+      const height = Math.round(viewport.height), top = Math.max(0, Math.round(viewport.offsetTop ?? 0))
+      style.setProperty('--dsh-pwa-viewport', `${height}px`)
+      // iOS pans the visual viewport over the page when the keyboard opens. Move the
+      // app with it, or the shortened app stays at the top and the visible area is blank.
+      if (top) style.setProperty('--dsh-pwa-shift', `translateY(${top}px)`)
+      else style.removeProperty('--dsh-pwa-shift')
+      const windowHeight = this.view?.innerHeight
+      this.root.toggleAttribute?.('data-dsh-mobile-keyboard', typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
+    }
+    syncToolbar() { this.root?.toggleAttribute?.('data-dsh-mobile-toolbar', this.state.active && this.chrome.get().inline === 0) }
+    /** Register a menu button; a conversation-header button replaces the fallback toolbar while mounted. */
+    claimMenu(element, inline) {
+      const entry = { element, inline: !!inline }
+      this.menus.add(entry)
+      if (entry.inline) this.chrome.set({ inline: this.chrome.get().inline + 1 })
+      this.syncToolbar()
+      return () => {
+        if (!this.menus.delete(entry)) return
+        if (entry.inline) this.chrome.set({ inline: Math.max(0, this.chrome.get().inline - 1) })
+        this.syncToolbar()
+      }
+    }
+    focusMenu() {
+      const entry = [...this.menus].reverse().find(({ element }) => element.isConnected && !element.closest?.('[inert],[hidden]') && element.getClientRects?.().length)
+      entry?.element.focus({ preventScroll: true })
+    }
+    dispose() {
+      this.viewport?.removeEventListener?.('resize', this.onViewport)
+      this.viewport?.removeEventListener?.('scroll', this.onViewport)
+      this.query?.removeEventListener?.('change', this.onChange)
+      this.root?.style?.removeProperty('--dsh-pwa-viewport'); this.root?.style?.removeProperty('--dsh-pwa-shift')
+      for (const name of ['data-dsh-mobile', 'data-dsh-mobile-toolbar', 'data-dsh-mobile-keyboard']) this.root?.removeAttribute?.(name)
+      this.listeners.clear(); this.chrome.clear(); this.menus.clear()
+    }
   }
-  // Internal DOM seam: official ui-layout at 5719020 (0.2.1-alpha.3).
+  // Internal DOM seam: official ui-layout and ui-conversation, checked on 0.2.1-alpha.3 and 0.2.1-rc.2.
   // There is no public mobile-presentation API. Keep state in ctx.layout and
   // style only stable slot/data markers; never copy or replace the DSH shell.
   const FRAME = '[data-slot=root] > div', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
+  const HEADER = '[data-slot="conversation.header"] > header', SETTINGS = '[data-shortcut-modal=settings]'
+  const SAFE_L = 'env(safe-area-inset-left,0px)', SAFE_R = 'env(safe-area-inset-right,0px)', SAFE_B = 'env(safe-area-inset-bottom,0px)'
   const mobileCss = `
-    ${M}{--dsh-pwa-drawer:min(86vw,320px);--dsh-pwa-toolbar:calc(52px + env(safe-area-inset-top));-webkit-tap-highlight-color:transparent}
+    ${M}{--dsh-pwa-drawer:min(86vw,320px);--dsh-pwa-top:env(safe-area-inset-top,0px);--dsh-pwa-cover:0px;-webkit-tap-highlight-color:transparent}
+    ${M}[data-dsh-mobile-toolbar]{--dsh-pwa-top:calc(52px + env(safe-area-inset-top,0px));--dsh-pwa-cover:var(--dsh-pwa-top)}
     ${M} body{overscroll-behavior:none}
-    ${M} #root{height:var(--dsh-pwa-viewport,100dvh)!important;min-height:0}
-    ${M} ${FRAME}{grid-template-columns:0 minmax(0,1fr) 0!important;box-sizing:border-box;padding-top:var(--dsh-pwa-toolbar);transition:none!important}
-    ${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:2;grid-row:1;min-width:0;min-height:0;transform:none!important;border-radius:0}
-    ${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;top:var(--dsh-pwa-toolbar);left:0;width:var(--dsh-pwa-drawer);height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-toolbar));z-index:30;box-sizing:border-box;padding:0 0 env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
+    ${M} #root{height:var(--dsh-pwa-viewport,100dvh)!important;min-height:0;transform:var(--dsh-pwa-shift,none)}
+    ${M} ${FRAME}{grid-template-columns:0 minmax(0,1fr) 0!important;box-sizing:border-box;padding-top:var(--dsh-pwa-top);transition:none!important}
+    ${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:2;grid-row:1;min-width:0;min-height:0;transform:none!important;border-radius:0;box-sizing:border-box;padding-inline:${SAFE_L} ${SAFE_R}}
+    ${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;top:var(--dsh-pwa-cover);left:0;width:calc(var(--dsh-pwa-drawer) + ${SAFE_L});height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-cover));z-index:30;box-sizing:border-box;padding:calc(var(--dsh-pwa-top) - var(--dsh-pwa-cover)) 0 ${SAFE_B} ${SAFE_L};background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
     ${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s;box-shadow:8px 0 24px #0002}
     ${M} [data-slot=sidebar]>div{width:100%!important}
     ${M} [data-slot=sidebar] nav button{min-height:44px}
     ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
-    ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding-bottom:env(safe-area-inset-bottom)}
+    ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding:0 ${SAFE_R} ${SAFE_B} ${SAFE_L}}
     ${M} ${FRAME}>div[data-side]{display:none!important}
-    ${M} [data-composer-seat]{min-width:0;padding-bottom:env(safe-area-inset-bottom)}
+    ${M} ${HEADER}{min-height:0;padding:6px 20px 0 6px}
+    ${M} ${HEADER}:not(:has([data-conversation-tabs])){padding-bottom:6px}
+    ${M} [data-conversation-header-leading]:empty{display:none}
+    ${M} [data-conversation-tabs]{margin-top:2px;padding-left:10px;gap:28px}
+    @media (min-width:560px) and (max-height:500px){
+      ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto}
+      ${M} ${HEADER} [data-conversation-tabs]{grid-column:3;grid-row:1;align-self:end;margin:0 0 0 16px;padding-left:0}
+    }
+    ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
+    ${M}[data-dsh-mobile-keyboard] [data-composer-seat]{padding-bottom:0}
     ${M} [data-composer-input],${M} input,${M} textarea,${M} select{font-size:max(16px,1em)}
-    ${M} [data-slot=main]{min-width:0;min-height:0}
-    ${M} [data-shortcut-modal=settings]{flex-direction:column!important;width:calc(100vw - 16px);max-width:calc(100vw - 16px);height:calc(var(--dsh-pwa-viewport,100dvh) - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));max-height:900px;min-width:0;border-radius:16px}
-    ${M} [data-shortcut-modal=settings]>nav{width:auto!important;min-width:0;flex:none!important;max-width:100%;padding:12px 12px 0;gap:8px;border:0}
-    ${M} [data-shortcut-modal=settings]>nav>div:last-child{display:flex;flex-direction:row;gap:4px;overflow-x:auto;overscroll-behavior-x:contain}
-    ${M} [data-shortcut-modal=settings]>nav>div:last-child>*{flex:none;width:auto;min-height:44px}
-    ${M} [data-shortcut-modal=settings]>div:last-child{flex:1 1 auto;min-height:0;min-width:0;width:auto}
-    ${M} [data-shortcut-modal=settings]>div:last-child>div:first-child{height:48px;padding:2px 12px}
-    ${M} [data-shortcut-modal=settings]>div:last-child>div:first-child button{min-width:44px;min-height:44px}
-    ${M} [data-shortcut-modal=settings]>div:last-child>div:last-child{padding:0 16px 16px;min-width:0;overflow:auto}
-    ${M} .dsh-pwa-actions button{min-height:44px}
-    .dsh-pwa-toolbar{position:fixed;top:0;left:0;right:0;height:var(--dsh-pwa-toolbar);padding:env(safe-area-inset-top) max(8px,env(safe-area-inset-right)) 0 max(8px,env(safe-area-inset-left));box-sizing:border-box;display:flex;align-items:center;gap:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-bottom:1px solid var(--dsw-alias-border-l3);pointer-events:auto}
-    .dsh-pwa-toolbar strong{font-size:14px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .dsh-pwa-menu{border:0;padding:0;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:inherit;background:transparent;cursor:pointer;flex:none}
-    .dsh-pwa-menu:hover{background:var(--dsw-alias-interactive-bg-hover)}
-    .dsh-pwa-menu:focus-visible{outline:2px solid currentColor;outline-offset:-3px}
-    .dsh-pwa-scrim{position:fixed;top:var(--dsh-pwa-toolbar);left:var(--dsh-pwa-drawer);right:0;height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-toolbar));border:0;padding:0;background:#0005;pointer-events:auto}
-    .dsh-pwa-install{display:grid;gap:12px;min-width:0}
-    .dsh-pwa-identity{display:flex;align-items:center;gap:12px}
-    .dsh-pwa-identity img{width:56px;height:56px;border-radius:12px;flex:none}
-    @media(prefers-reduced-motion:reduce){${M} ${FRAME}>div,${M} [data-sidebar-right-panel] *{transition:none!important;animation:none!important}}
+    ${M} .md-table-wide{overflow-x:auto!important;padding-bottom:0!important;overscroll-behavior-x:contain}
+    ${M} [data-slot=main] table :is(th,td){max-width:min(60vw,320px)}
+    ${M} ${SETTINGS}{position:relative;flex-direction:column!important;width:calc(100vw - 16px - ${SAFE_L} - ${SAFE_R});max-width:none;height:calc(var(--dsh-pwa-viewport,100dvh) - 16px - env(safe-area-inset-top,0px) - ${SAFE_B});max-height:900px;min-width:0;border-radius:16px}
+    ${M} ${SETTINGS}>nav{width:auto!important;min-width:0;flex:none!important;max-width:100%;padding:8px 12px 0;gap:4px;border:0}
+    ${M} ${SETTINGS}>nav>div:first-child{display:flex;align-items:center;min-height:44px;max-width:calc(100% - 200px);padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    ${M} ${SETTINGS}>nav>div:last-child{display:flex;flex-direction:row;gap:4px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none}
+    ${M} ${SETTINGS}>nav>div:last-child>*{flex:none;width:auto;min-height:40px}
+    ${M} ${SETTINGS}>div:last-child{flex:1 1 auto;min-height:0;min-width:0;width:auto}
+    ${M} ${SETTINGS}>div:last-child>div:first-child{position:absolute;top:8px;right:8px;height:auto;max-width:calc(100% - 96px);padding:0;gap:4px;z-index:1}
+    ${M} ${SETTINGS}>div:last-child>div:first-child>*{min-width:0}
+    ${M} ${SETTINGS}>div:last-child>div:first-child button{white-space:nowrap}
+    ${M} ${SETTINGS}>div:last-child>div:first-child button{min-width:44px;min-height:44px}
+    ${M} ${SETTINGS}>div:last-child>div:last-child{padding:8px 16px calc(16px + ${SAFE_B});min-width:0;overflow:auto}
+    ${M} .dsh-pwa-actions button,${M} .dsh-pwa-segment button{min-height:40px}
+    .dsh-pwa-toolbar{position:fixed;top:0;left:0;right:0;height:var(--dsh-pwa-top);padding:env(safe-area-inset-top,0px) max(8px,${SAFE_R}) 0 max(8px,${SAFE_L});box-sizing:border-box;display:flex;align-items:center;gap:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-bottom:.5px solid var(--dsw-alias-border-l3);pointer-events:auto}
+    .dsh-pwa-toolbar strong{font-size:14px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .dsh-pwa-menu{border:0;padding:0;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:transparent;cursor:pointer;flex:none;-webkit-app-region:no-drag}
+    .dsh-pwa-menu-inline{width:40px;height:40px;margin:-5px 0;border-radius:10px}
+    .dsh-pwa-menu:active{background:var(--dsw-alias-interactive-bg-active)}
+    .dsh-pwa-menu:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-3px}
+    @media (hover:hover){.dsh-pwa-menu:hover{background:var(--dsw-alias-interactive-bg-hover)}}
+    .dsh-pwa-scrim{position:fixed;top:var(--dsh-pwa-cover);left:calc(var(--dsh-pwa-drawer) + ${SAFE_L});right:0;height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-cover));border:0;padding:0;background:#0005;pointer-events:auto}
+    @media (prefers-reduced-motion:reduce){${M} ${FRAME}>div,${M} [data-sidebar-right-panel] *{transition:none!important;animation:none!important}}
+  `
+  const settingsCss = `
+    .dsh-pwa-settings{display:grid;min-width:0}
+    .dsh-pwa-group{display:grid;gap:8px;min-width:0;padding:16px 0;border-bottom:.5px solid var(--dsw-alias-border-l2)}
+    .dsh-pwa-group:first-child{padding-top:0}
+    .dsh-pwa-group:last-child{border-bottom:0}
+    .dsh-pwa-settings :is(h4,p){margin:0;overflow-wrap:anywhere}
+    .dsh-pwa-title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:400;line-height:22px}
+    .dsh-pwa-desc{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
+    .dsh-pwa-state{color:var(--dsw-alias-label-secondary);font-size:13px;line-height:20px}
+    .dsh-pwa-state[role=alert]{color:var(--dsw-alias-state-error-primary)}
+    .dsh-pwa-identity{display:flex;align-items:center;gap:12px;min-width:0}
+    .dsh-pwa-identity>div{display:grid;gap:2px;min-width:0}
+    .dsh-pwa-identity img{width:44px;height:44px;border-radius:10px;flex:none;box-shadow:0 0 0 .5px var(--dsw-alias-border-l3)}
+    .dsh-pwa-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+    .dsh-pwa-segment{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;max-width:320px;padding:2px;border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-module-platform)}
+    .dsh-pwa-segment button{min-width:0;min-height:32px;padding:0 8px;border:0;border-radius:calc(var(--dsw-radius-md,8px) - 2px);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:13px;line-height:20px;cursor:pointer}
+    .dsh-pwa-segment button[aria-pressed=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-weight:500;box-shadow:0 1px 2px #0000001f,0 0 0 .5px var(--dsw-alias-border-l3)}
+    .dsh-pwa-segment button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}
+    @media (hover:hover){.dsh-pwa-segment button[aria-pressed=false]:hover{color:var(--dsw-alias-label-primary)}}
+    .dsh-pwa-notes{display:grid;gap:4px;white-space:pre-wrap}
+    .dsh-pwa-link{justify-self:start;color:var(--dsw-alias-link);font-size:12px;line-height:18px;text-decoration:none}
+    .dsh-pwa-link:hover{text-decoration:underline}
   `
   const icon = paths => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', 'aria-hidden': true }, paths.map(d => h('path', { key: d, d })))
   const menuIcon = () => icon(['M4 6h16', 'M4 12h16', 'M4 18h16'])
@@ -312,12 +418,27 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   // Closing the occupant, not layout.closeRightbar(), keeps its state in sync.
   function openRightPanel(root = document) { return [...root.querySelectorAll('[data-sidebar-right-panel][data-sidebar-right-open]')].find(panel => !panel.closest('[hidden]')) }
   function closePanel() { openRightPanel()?.querySelector('button[data-sidebar-right-toggle]')?.click() }
+  function useLocaleRevision(locale) { React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision) }
+  /** Inline sits in the official conversation.header.leading seat; otherwise it is the fallback toolbar button. */
+  function MenuButton({ ctx, mobile, locale, inline }) {
+    const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
+    const { open } = React.useSyncExternalStore(mobile.chrome.subscribe, mobile.chrome.get)
+    useLocaleRevision(locale)
+    const ref = React.useRef(null), t = locale.bind(NS)
+    // Layout effect: hide the fallback toolbar before the first paint of a header button.
+    React.useLayoutEffect(() => active && ref.current ? mobile.claimMenu(ref.current, inline) : undefined, [active, inline, mobile])
+    if (!active) return null
+    const panel = !inline && open === 'right', expanded = inline ? open === 'left' : open !== null
+    const label = panel ? t('mobile.closePanel') : t(open === 'left' ? 'mobile.close' : 'mobile.menu')
+    return h('button', { ref, type: 'button', className: inline ? 'dsh-pwa-menu dsh-pwa-menu-inline' : 'dsh-pwa-menu', 'aria-label': label, title: label, 'aria-expanded': expanded, onClick: panel ? closePanel : () => toggleSidebar(ctx) }, expanded && !inline ? closeIcon() : menuIcon())
+  }
   function MobileChrome({ ctx, mobile, locale }) {
     const { active } = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
-    React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
-    const t = locale.bind(NS), [open, setOpen] = React.useState(null), menu = React.useRef(null)
+    const { open, inline } = React.useSyncExternalStore(mobile.chrome.subscribe, mobile.chrome.get)
+    useLocaleRevision(locale)
+    const t = locale.bind(NS)
     React.useEffect(() => {
-      if (!active) { setOpen(null); return }
+      if (!active) return
       const frame = document.querySelector(FRAME)
       if (!frame) return
       const center = frame.querySelector(CENTER), sidebar = frame.querySelector(':scope > div:has(> [data-slot=sidebar])')
@@ -327,12 +448,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       let previous = null, timer
       const sync = () => {
         const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
-        setOpen(next)
+        mobile.chrome.set({ open: next })
         if (center) center.inert = originalInert.get(center) || next !== null
         if (sidebar) sidebar.inert = originalInert.get(sidebar) || next !== 'left'
         // Return focus only when it was inside the surface that is closing.
         if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
-        if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) menu.current?.focus({ preventScroll: true })
+        if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) mobile.focusMenu()
         if (previous === 'left' && next === 'right') close()
         previous = next
       }
@@ -355,7 +476,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const onKey = event => {
         // Portalled menus/dialogs own Escape before our drawer does.
         if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role=dialog],[role=menu]')) return
-        if (previous === 'left') { event.preventDefault(); close(); menu.current?.focus() }
+        if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
       document.addEventListener('click', onClick, true)
       document.addEventListener('keydown', onKey)
@@ -365,49 +486,49 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         document.removeEventListener('click', onClick, true); document.removeEventListener('keydown', onKey)
         for (const [el, inert] of originalInert) el.inert = inert
       }
-    }, [active, ctx, locale])
+    }, [active, ctx, locale, mobile])
     if (!active) return null
-    const label = open === 'right' ? t('mobile.closePanel') : t(open === 'left' ? 'mobile.close' : 'mobile.menu')
     return h(React.Fragment, null,
       open === 'left' && h('button', { type: 'button', className: 'dsh-pwa-scrim', 'aria-label': t('mobile.dismiss'), tabIndex: -1, onClick: () => toggleSidebar(ctx) }),
-      h('div', { className: 'dsh-pwa-toolbar' },
-        h('button', { ref: menu, type: 'button', className: 'dsh-pwa-menu', 'aria-label': label, title: label, 'aria-expanded': open !== null, onClick: open === 'right' ? closePanel : () => toggleSidebar(ctx) }, open ? closeIcon() : menuIcon()),
+      inline === 0 && h('div', { className: 'dsh-pwa-toolbar' },
+        h(MenuButton, { ctx, mobile, locale, inline: false }),
         h('strong', null, 'DeepSeek Harness')))
   }
   function MobileUI({ mobile, locale }) {
     const state = React.useSyncExternalStore(mobile.subscribe, mobile.getSnapshot)
     const t = locale.bind(NS)
-    return h('div', { className: 'dsh-pwa-mobile' },
-      h('h4', null, t('mobile.title')),
-      h('div', { className: 'dsh-pwa-actions', role: 'group', 'aria-label': t('mobile.title') },
-        MODES.map(mode => h(Button, { key: mode, size: 'sm', variant: state.mode === mode ? 'primary' : 'outline', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
-      h('p', { role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')),
-      h('p', { className: 'dsh-pwa-muted' }, t('mobile.hint')))
+    return h('div', { className: 'dsh-pwa-group dsh-pwa-mobile' },
+      h('h4', { className: 'dsh-pwa-title' }, t('mobile.title')),
+      h('p', { className: 'dsh-pwa-desc' }, t('mobile.hint')),
+      h('div', { className: 'dsh-pwa-segment', role: 'group', 'aria-label': t('mobile.title') },
+        MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
+      h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
   }
   function UpdateUI({ controller, locale }) {
     const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot)
     const t = locale.bind(NS)
     React.useEffect(() => { void controller.load() }, [controller])
     const active = ['checking', 'starting', 'preparing', 'installing'].includes(state.status)
-    return h('div', { className: 'dsh-pwa-updates' },
-      h('h4', null, t('updates')),
-      h('p', null, `${t('version')}: ${state.runtimeVersion ?? '—'}`),
-      state.installedVersion && state.installedVersion !== state.runtimeVersion && h('p', null, `${t('installed')}: ${state.installedVersion}`),
-      h('p', { role: ['failed', 'blocked'].includes(state.status) ? 'alert' : 'status' }, t(state.status)),
-      state.reason && h('p', { className: 'dsh-pwa-muted' }, t(`reason.${state.reason}`)),
-      state.candidate && h('div', { className: 'dsh-pwa-notes' }, h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`), h('p', null, state.candidate.notes)),
+    return h('div', { className: 'dsh-pwa-group dsh-pwa-updates' },
+      h('h4', { className: 'dsh-pwa-title' }, t('updates')),
+      h('p', { className: 'dsh-pwa-desc' }, `${t('version')}: ${state.runtimeVersion ?? '—'}`),
+      state.installedVersion && state.installedVersion !== state.runtimeVersion && h('p', { className: 'dsh-pwa-desc' }, `${t('installed')}: ${state.installedVersion}`),
+      // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
+      h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
+      state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
+      state.candidate && h('div', { className: 'dsh-pwa-notes dsh-pwa-desc' }, h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`), h('p', null, state.candidate.notes)),
       h('div', { className: 'dsh-pwa-actions' },
         h(Button, { size: 'sm', variant: 'outline', disabled: active || ['unknown', 'restart-required'].includes(state.status), onClick: () => { void controller.check() } }, t('check')),
         state.status === 'available' && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void controller.begin() } }, t('install')),
         state.status === 'unknown' && h(Button, { size: 'sm', variant: 'outline', onClick: () => { void controller.load() } }, t('reconcile'))),
-      h('a', { href: 'https://github.com/Aero123421/dsh-pwa/releases', target: '_blank', rel: 'noopener noreferrer' }, t('manual')),
-      state.result?.stage && h('p', { className: 'dsh-pwa-muted' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
-      h('p', { className: 'dsh-pwa-muted' }, t('hint')))
+      h('a', { className: 'dsh-pwa-link', href: 'https://github.com/Aero123421/dsh-pwa/releases', target: '_blank', rel: 'noopener noreferrer' }, t('manual')),
+      state.result?.stage && h('p', { className: 'dsh-pwa-desc' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
+      h('p', { className: 'dsh-pwa-desc' }, t('hint')))
   }
   function SettingsUI({ controller, mobile, install, locale }) {
-    React.useSyncExternalStore(listener => locale.subscribe(listener), () => locale.getSnapshot().revision)
-    return h('section', { className: 'dsh-pwa-settings' },
-      h('h3', null, locale.bind(NS)('title')),
+    useLocaleRevision(locale)
+    // The Settings navigation already names this section, as it does for the built-in sections.
+    return h('section', { className: 'dsh-pwa-settings', 'aria-label': locale.bind(NS)('title') },
       h(InstallUI, { install, locale }),
       h(MobileUI, { mobile, locale }),
       controller && h(UpdateUI, { controller, locale }))
@@ -422,7 +543,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ctx.effect(() => {
       const style = document.createElement('style')
       style.dataset.dshPwaUpdates = ''
-      style.textContent = '.dsh-pwa-settings,.dsh-pwa-updates,.dsh-pwa-mobile{display:grid;gap:12px;min-width:0}.dsh-pwa-settings{gap:24px}.dsh-pwa-settings p,.dsh-pwa-settings h3,.dsh-pwa-settings h4{margin:0;overflow-wrap:anywhere}.dsh-pwa-actions{display:flex;flex-wrap:wrap;gap:8px}.dsh-pwa-notes{white-space:pre-wrap;overflow-wrap:anywhere}.dsh-pwa-muted{color:var(--dsw-alias-text-secondary);font-size:var(--dsw-alias-font-size-body,13px)}' + mobileCss
+      style.textContent = settingsCss + mobileCss
       document.head.append(style)
       return () => style.remove()
     })
@@ -430,6 +551,21 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     const t = ctx.locale.bind(NS)
     ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'dsh-pwa', order: 920, label: () => t('title') }, () => h(SettingsUI, { controller, mobile, install, locale: ctx.locale })))
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-pwa.mobile' }, () => h(MobileChrome, { ctx, mobile, locale: ctx.locale })))
+    // Official seat for global navigation before the Session title; empty in stock DSH. It holds a
+    // single entry, so register only while the mobile layout is active and never shadow another
+    // plugin's desktop content. Priority 100 yields to ordinary registrations (default 0);
+    // equal priorities throw in DSH instead of electing a winner. The fallback toolbar stays.
+    ctx.slots.inject('conversation.header.leading', () => {
+      let dispose = null
+      const sync = () => {
+        if (mobile.getSnapshot().active === !!dispose) return
+        if (dispose) { dispose(); dispose = null; return }
+        dispose = ctx.slots.register({ name: 'conversation.header.leading', id: 'dsh-pwa.menu', priority: 100 }, () => h(MenuButton, { ctx, mobile, locale: ctx.locale, inline: true }))
+      }
+      const unsubscribe = mobile.subscribe(sync)
+      sync()
+      return () => { unsubscribe(); dispose?.() }
+    })
   }
   return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy }
 } })

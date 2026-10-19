@@ -1,6 +1,6 @@
 {
   "name": "dsh-pwa",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "PWA & Mobile for DeepSeek Harness Web: installable iOS/iPadOS and browser PWA icons plus a switchable phone layout",
   "type": "module",
   "main": "./index.js",
