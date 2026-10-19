@@ -4,9 +4,28 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
+import { createServer } from 'node:http'
 import { chromium } from 'playwright'
 const world = await mkdtemp(join(tmpdir(), 'dsh-pwa-smoke-'))
-const env = { ...process.env, DSH_HOME: world, DSH_TELEMETRY_MODE: 'DISABLED', DEEPSEEK_API_KEY: 'pwa-smoke-fixture-key', DEEPSEEK_BASE_URL: 'http://127.0.0.1:9', DEEPSEEK_SEARCH_BASE_URL: 'http://127.0.0.1:9' }
+// Local Anthropic-format stub: one fixed Markdown reply with a wide table. No model API is called.
+const reply = '| Column A | Column B | A much longer column C | Column D |\n| --- | --- | --- | --- |\n| 1 | value | a long cell that needs more than the narrow phone width | ok |\n\nEnd of fixture reply.'
+const stub = createServer((req, res) => {
+  let body = ''
+  req.on('data', chunk => { body += chunk })
+  req.on('end', () => {
+    if (req.method !== 'POST' || !req.url.endsWith('/messages')) { res.writeHead(404); res.end(); return }
+    let stream = false
+    try { stream = JSON.parse(body).stream === true } catch {}
+    const message = { id: 'msg_fixture', type: 'message', role: 'assistant', model: 'fixture', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, output_tokens: 0 } }
+    if (!stream) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ...message, content: [{ type: 'text', text: 'Fixture' }], stop_reason: 'end_turn' })); return }
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+    for (const event of [{ type: 'message_start', message }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }, { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: reply } }, { type: 'content_block_stop', index: 0 }, { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } }, { type: 'message_stop' }]) res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    res.end()
+  })
+})
+await new Promise(resolve => stub.listen(0, '127.0.0.1', resolve))
+const modelUrl = `http://127.0.0.1:${stub.address().port}`
+const env = { ...process.env, DSH_HOME: world, DSH_TELEMETRY_MODE: 'DISABLED', DEEPSEEK_API_KEY: 'pwa-smoke-fixture-key', DEEPSEEK_BASE_URL: modelUrl, DEEPSEEK_SEARCH_BASE_URL: 'http://127.0.0.1:9' }
 const manifest = JSON.parse(await readFile('package.json', 'utf8'))
 const source = process.argv[2] ?? resolve(`dsh-pwa-${manifest.version}.tgz`)
 const profile = 'pwa-update-smoke'
@@ -186,10 +205,16 @@ try {
       await page.keyboard.press('Escape'); await menu.waitFor()
       await drawer()
       await page.screenshot({ path: join(world, 'mobile-drawer-open.png'), animations: 'disabled' })
-      await page.getByRole('button', { name: 'サイドバーを閉じる', exact: true }).click(); await menu.waitFor()
+      // The header menu is behind the open drawer; the backdrop closes it.
+      const scrim = page.getByRole('button', { name: 'サイドバーの背景を閉じる', exact: true })
+      await scrim.click(); await menu.waitFor()
       await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
       await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).first().click(); await menu.waitFor()
+      assert.equal(await page.locator('.dsh-pwa-toolbar').count(), 0, 'conversation views use the header menu, not the fallback toolbar')
+      assert.equal(await page.locator('[data-conversation-header-leading] .dsh-pwa-menu-inline').count(), 1)
       await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
+      await page.locator('.dsh-pwa-toolbar').waitFor()
+      assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile-toolbar')), true, 'pages without a conversation header keep the toolbar')
       await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
       await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
       const id = await page.evaluate(async cwd => {
@@ -200,16 +225,29 @@ try {
       await page.waitForFunction(id => document.querySelector('[data-conversation-session]')?.dataset.conversationSession === id, id)
       await page.locator('[data-composer-input]').waitFor()
       assert.ok(await page.locator('[data-composer-input]').evaluate(el => parseFloat(getComputedStyle(el).fontSize) >= 16), 'mobile composer avoids iOS focus zoom')
+      const header = await page.locator('[data-slot="conversation.header"] > header').boundingBox()
+      assert.ok(header.height <= 72, `conversation header stays compact: ${header.height}`)
+      if (restart === 0) {
+        await page.locator('[data-composer-input]').fill('Show the fixture table.')
+        await page.locator('[data-composer-input]').press('Enter')
+        await page.getByText('End of fixture reply.', { exact: true }).waitFor({ timeout: 30000 })
+        const table = page.locator('[data-conversation-content] .md-table-wide').first()
+        await table.scrollIntoViewIfNeeded()
+        assert.equal(await table.evaluate(el => getComputedStyle(el).overflowX), 'auto', 'wide tables scroll on touch screens without hover')
+        assert.ok(await table.evaluate(el => { el.scrollLeft = el.scrollWidth; return el.scrollLeft > 0 }), 'wide table scrolls horizontally')
+        await page.screenshot({ path: join(world, 'mobile-table.png'), animations: 'disabled' })
+      }
+      const panelToggle = page.locator('[data-sidebar-right-panel][data-sidebar-right-open] button[data-sidebar-right-toggle]')
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
-      await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).waitFor()
+      await panelToggle.waitFor()
       await page.waitForFunction(() => { const p = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]'); return p && p.getBoundingClientRect().right <= innerWidth + 1 })
       const right = await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').boundingBox()
       assert.ok(Math.abs(right.width - 390) < 1 && Math.abs(right.x) < 1, 'files use the entire phone width')
       await page.screenshot({ path: join(world, 'mobile-right-panel.png'), animations: 'disabled' })
-      await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).click()
+      await panelToggle.click()
       await page.waitForFunction(() => !window.__pwaTestContext.get('sidebarRight').isExpanded())
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
-      await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).waitFor()
+      await panelToggle.waitFor()
       await page.getByText('Workspace files', { exact: true }).click()
       await page.locator('[data-sidebar-right-panel] button[data-sidebar-right-toggle]').click()
       await menu.waitFor()
@@ -219,23 +257,42 @@ try {
       await drawer()
       assert.equal(await page.locator('[data-slot=root]>div>div[data-side]').first().evaluate(el => getComputedStyle(el).display), 'none')
       await page.screenshot({ path: join(world, `mobile-drawer-dark-${restart}.png`), animations: 'disabled' })
-      await page.getByRole('button', { name: 'サイドバーを閉じる', exact: true }).click(); await menu.waitFor()
+      await scrim.click(); await menu.waitFor()
       await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
-      await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).waitFor()
+      await panelToggle.waitFor()
       assert.equal(await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').evaluate(el => getComputedStyle(el).animationName), 'none')
       await page.screenshot({ path: join(world, `mobile-right-dark-${restart}.png`), animations: 'disabled' })
-      await page.getByRole('button', { name: 'パネルを閉じる', exact: true }).click(); await menu.waitFor()
+      await panelToggle.click(); await menu.waitFor()
       await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' })
       await page.setViewportSize({ width: 1280, height: 900 }); await active(false)
       assert.equal(await page.locator('.dsh-pwa-menu,.dsh-pwa-scrim').count(), 0)
+      // The header seat holds one entry; outside the mobile layout it must stay free for other plugins.
+      assert.equal(await page.evaluate(() => window.__pwaTestContext.slots.entries?.('conversation.header.leading')?.length ?? 0), 0, 'header seat is released on desktop')
       await page.screenshot({ path: join(world, `desktop-conversation-${restart}.png`), animations: 'disabled' })
+      if (restart === 0) {
+        // Auto mode treats a touch phone in landscape as mobile even though it is wider than 767px.
+        const phone = await browser.newContext({ locale: 'ja-JP', viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true })
+        try {
+          const landscape = await phone.newPage()
+          landscape.on('pageerror', error => errors.push(error.message))
+          await landscape.goto(url)
+          await landscape.waitForFunction(() => document.documentElement.hasAttribute('data-dsh-mobile'))
+          await landscape.locator('.dsh-pwa-menu').first().waitFor()
+          const center = await landscape.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
+          assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - 844) < 1, 'single-column shell in landscape')
+          await landscape.screenshot({ path: join(world, 'mobile-landscape.png'), animations: 'disabled' })
+        } finally { await phone.close() }
+      }
       assert.equal(errors.length, 0, errors.join('\n'))
-      assert.ok(!consoleMessages.some(message => /dsh-pwa|PWA update/i.test(message)), consoleMessages.join('\n'))
+      // Judge only the message line: DSH serves several plugins from one combined URL, so a stack
+      // trace from another plugin can name dsh-pwa/client.js. The fixture directory is dsh-pwa-smoke-*.
+      const own = consoleMessages.filter(message => /\bdsh-pwa\b(?!-smoke)|PWA update/i.test(message.split('\n')[0]))
+      assert.equal(own.length, 0, own.join('\n'))
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, drawers/reselection, reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'wide table scroll, landscape phone, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }
-} finally { await browser?.close() }
+} finally { await browser?.close(); stub.close() }

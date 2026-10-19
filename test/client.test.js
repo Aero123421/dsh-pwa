@@ -129,3 +129,59 @@ test('mobile layout survives missing storage and matchMedia', async () => {
   assert.deepEqual({ ...mobile.getSnapshot() }, { mode: 'auto', active: false })
   mobile.setMode('on'); assert.equal(mobile.getSnapshot().active, true); mobile.dispose()
 })
+
+function styledRoot() {
+  const attrs = new Set(), props = new Map()
+  return { attrs, props, toggleAttribute: (name, on) => { if (on) attrs.add(name); else attrs.delete(name) }, removeAttribute: name => attrs.delete(name),
+    style: { setProperty: (name, value) => props.set(name, value), removeProperty: name => props.delete(name) } }
+}
+function visualViewport(values) {
+  const listeners = new Map()
+  return { ...values, addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener: type => listeners.delete(type), listeners,
+    set(next) { Object.assign(this, next); for (const fn of listeners.values()) fn() } }
+}
+
+test('auto mode also covers phones in landscape', async () => {
+  const { MobileController } = await clientExports()
+  let query
+  const mobile = new MobileController({ storage: storage(), matchMedia: value => { query = value; return media(false).query }, root: root(), viewport: null })
+  assert.match(query, /max-width: 767px/); assert.match(query, /max-height: 500px\) and \(pointer: coarse\)/)
+  mobile.dispose()
+})
+
+test('mobile layout follows the visual viewport when an on-screen keyboard opens', async () => {
+  const { MobileController } = await clientExports()
+  const html = styledRoot(), viewport = visualViewport({ height: 844, offsetTop: 0, scale: 1 })
+  const mobile = new MobileController({ storage: storage(), matchMedia: () => media(true).query, root: html, viewport, view: { innerHeight: 844 } })
+  assert.equal(html.props.get('--dsh-pwa-viewport'), '844px'); assert.equal(html.props.has('--dsh-pwa-shift'), false)
+  assert.equal(html.attrs.has('data-dsh-mobile-keyboard'), false)
+  // iOS keeps the window height and pans the shorter visual viewport down.
+  viewport.set({ height: 500.4, offsetTop: 343.6 })
+  assert.equal(html.props.get('--dsh-pwa-viewport'), '500px'); assert.equal(html.props.get('--dsh-pwa-shift'), 'translateY(344px)')
+  assert.equal(html.attrs.has('data-dsh-mobile-keyboard'), true)
+  // Pinch zoom moves the visual viewport too; the last unzoomed frame stays.
+  viewport.set({ scale: 2, height: 300, offsetTop: 10 })
+  assert.equal(html.props.get('--dsh-pwa-viewport'), '500px')
+  viewport.set({ scale: 1, height: 844, offsetTop: 0 })
+  assert.equal(html.props.has('--dsh-pwa-shift'), false); assert.equal(html.attrs.has('data-dsh-mobile-keyboard'), false)
+  mobile.setMode('off')
+  assert.equal(html.props.has('--dsh-pwa-viewport'), false)
+  mobile.dispose(); assert.equal(viewport.listeners.size, 0)
+})
+
+test('a conversation header menu replaces the fallback toolbar only while mounted', async () => {
+  const { MobileController } = await clientExports()
+  const html = styledRoot()
+  const mobile = new MobileController({ storage: storage(), matchMedia: () => media(true).query, root: html, viewport: null })
+  assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), true)
+  const toolbar = mobile.claimMenu({}, false)
+  assert.equal(mobile.chrome.get().inline, 0); assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), true)
+  const header = mobile.claimMenu({}, true)
+  assert.equal(mobile.chrome.get().inline, 1); assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), false)
+  header(); header()
+  assert.equal(mobile.chrome.get().inline, 0); assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), true)
+  mobile.chrome.set({ open: 'left' }); mobile.setMode('off')
+  assert.equal(mobile.chrome.get().open, null); assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), false)
+  toolbar(); mobile.dispose()
+  assert.deepEqual([...html.attrs], [])
+})
