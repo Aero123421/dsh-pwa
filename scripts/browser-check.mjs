@@ -239,7 +239,10 @@ try {
         if (width === 320) {
           await page.keyboard.press('Escape')
           await page.getByRole('dialog').waitFor({ state: 'hidden' })
+          await page.getByRole('button', { name: 'サイドバーを開く', exact: true }).click()
           await openSettings()
+          await page.getByRole('dialog').waitFor()
+          await page.waitForFunction(() => document.querySelector('[data-slot=root] > div')?.hasAttribute('data-sidebar-collapsed'))
           await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
           await page.waitForFunction(() => {
             const selected = document.querySelector('[data-shortcut-modal=settings] [aria-current="true"]')
