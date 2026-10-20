@@ -264,7 +264,7 @@ try {
       assert.ok((await panel.innerText()).includes('ホーム画面'))
       await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({ state: 'hidden' })
       assert.equal(await page.locator('vite-error-overlay,nextjs-portal').count(), 0)
-      const menu = page.getByRole('button', { name: 'サイドバーを開く', exact: true })
+      const menu = page.locator('button.dsh-pwa-menu').first()
       async function drawer() {
         await menu.click()
         await page.waitForFunction(() => { const side = document.querySelector('[data-slot=root]>div>div:has(>[data-slot=sidebar])'); return side?.getBoundingClientRect().x >= -.5 })
@@ -379,21 +379,47 @@ try {
         await page.screenshot({ path: join(world, 'drawer-rename-dialog.png'), animations: 'disabled' })
         await page.keyboard.press('Escape')
         await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal="true"]'))
-        const restored = await page.evaluate(() => {
+        const restored = await page.evaluate(sessionId => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const sidebar = document.querySelector('[data-slot=sidebar]')
+          const opener = document.querySelector(`[data-row-key="session:${sessionId}"] button`)
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            openerConnected: opener instanceof HTMLElement && opener.isConnected && !sidebar?.inert,
+          }
+        }, id)
+        assert.equal(restored.collapsed, false, 'closing the rename dialog leaves the drawer open')
+        assert.equal(restored.scrim, true)
+        assert.equal(restored.openerConnected, true, 'the drawer control that opened the dialog is still connected')
+        await page.evaluate(sessionId => {
+          const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
+          const title = [...row.querySelectorAll('span')].find(el => String(el.className).includes('title'))
+          if (!title) throw new Error('session title missing')
+          title.tabIndex = 0
+          title.focus()
+          title.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+        }, id)
+        await page.locator('[role=dialog][aria-modal="true"]').waitFor()
+        await page.waitForFunction(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          return frame && !frame.hasAttribute('data-sidebar-collapsed') && document.querySelector('.dsh-pwa-scrim')
+        })
+        await page.keyboard.press('Escape')
+        await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal="true"]'))
+        const titleFocus = await page.evaluate(() => {
           const frame = document.querySelector('[data-slot=root] > div')
           const sidebar = document.querySelector('[data-slot=sidebar]')
           const active = document.activeElement
           return {
             collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
             scrim: !!document.querySelector('.dsh-pwa-scrim'),
-            connected: active instanceof HTMLElement && active.isConnected,
             inSidebar: !!(sidebar && active && sidebar.contains(active)),
           }
         })
-        assert.equal(restored.collapsed, false, 'closing the rename dialog leaves the drawer open')
-        assert.equal(restored.scrim, true)
-        assert.equal(restored.connected, true, 'the rename dialog still has a connected focus target')
-        assert.equal(restored.inSidebar, true, 'focus returns inside the drawer')
+        assert.equal(titleFocus.collapsed, false, 'a title rename leaves the drawer open')
+        assert.equal(titleFocus.scrim, true)
+        assert.equal(titleFocus.inSidebar, true, 'focus returns to the session title in the drawer')
         await scrim.click(); await menu.waitFor()
         const table = page.locator('[data-conversation-content] .md-table-wide').first()
         await table.scrollIntoViewIfNeeded()

@@ -491,12 +491,19 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // A menu portaled out of the sidebar is still a drawer action (rename, confirm).
       let fromDrawer = false
       let dialogFromDrawer = false
+      let drawerFocusAt = 0
       const noteDrawerGesture = event => {
         fromDrawer = !!event.target?.closest?.('[data-slot=sidebar], [role=menu]')
       }
+      const noteDrawerFocus = event => {
+        const sidebar = document.querySelector('[data-slot=sidebar]')
+        if (sidebar?.contains(event.target)) drawerFocusAt = Date.now()
+      }
       const focusInSidebar = () => {
         const sidebar = document.querySelector('[data-slot=sidebar]')
-        return !!(sidebar && document.activeElement && sidebar.contains(document.activeElement))
+        const focused = !!(sidebar && document.activeElement && sidebar.contains(document.activeElement))
+        // The dialog moves focus before the mutation observer runs, so the recent sidebar focus still counts.
+        return focused || Date.now() - drawerFocusAt < 1000
       }
       const onClick = event => {
         noteDrawerGesture(event)
@@ -533,6 +540,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
       document.addEventListener('pointerdown', noteDrawerGesture, true)
+      document.addEventListener('focusin', noteDrawerFocus, true)
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
       const onBody = records => {
@@ -566,7 +574,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       sync()
       return () => {
         clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
-        document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
+        document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
         if (pushState && history.pushState !== pushState) history.pushState = pushState
         if (replaceState && history.replaceState !== replaceState) history.replaceState = replaceState

@@ -127,6 +127,7 @@ Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The
 npm ci --ignore-scripts
 npm test
 npm run check:dsh-peer
+npm run check:no-add-language
 npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
 npx playwright install --with-deps chromium
 node scripts/pwa-proxy-check.mjs
@@ -136,9 +137,11 @@ npm run test:browser
 
 `npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
 
+`npm run check:no-add-language` packs this plugin and fails if any published file defines a language. The test directory is not part of that package.
+
 Node's built-in runner checks the mobile mode store, the landscape and keyboard viewport handling, the header-menu/top-bar switch, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
 
-The Playwright smoke installs the packed package into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, the header menu and the top-bar fallback, drawers and reselection, a sideways-scrolling wide table, files, composer text size, a touch phone in landscape, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese is registered only in the test context. Model requests go to a local stub inside the script that returns one fixed Markdown reply; no model API is called.
+The Playwright smoke installs the packed package and dsh-japanese into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, the header menu and the top-bar fallback, drawers and reselection, a sideways-scrolling wide table, files, composer text size, a touch phone in landscape, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese comes from dsh-japanese. Model requests go to a local stub inside the script that returns one fixed Markdown reply; no model API is called.
 
 The separate proxy regression uses the production metadata routes behind a cookie gate at `/ui/` with mobile/touch emulation. It checks the missing-credentials failure as a negative control, then credentialed server discovery and repair of an already open page. It does not connect to a user's proxy or credentials.
 
