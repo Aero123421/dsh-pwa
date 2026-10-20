@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
-import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
+import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, releaseNotes, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
 const version = '0.3.0', tag = `v${version}`
 const filename = `dsh-pwa-${version}.tgz`
 const download = `https://github.com/${REPOSITORY}/releases/download/${tag}/`
@@ -88,6 +88,7 @@ test('single pinned install preserves disabled selection; journal supports recon
   assert.equal((await restarted.reconcile(requestId)).status, 'unknown')
   bundle.version = version
   assert.equal((await restarted.reconcile(requestId)).status, 'applied')
+  assert.equal(await restarted.lastOperation(), undefined)
 })
 test('missing manager/read-only/source reject before networking and an ongoing operation rejects begin', async t => {
   const { updater, bundle } = await fixture(t, { fetcher: async () => { throw new Error('unexpected fetch') } })
@@ -580,4 +581,73 @@ test('a removeBundle throw restores when the package is confirmed gone', async t
 
 test('manager cancellation and override retain their terminal outcome despite package exit', () => {
   for (const application of ['cancelled', 'overridden']) assert.equal(resultState({ application, packageResult: { exitCode: 130, timedOut: true } }, '0.3.0', '0.2.0'), application)
+})
+
+test('release notes keep en and ja sections; an unmarked body stays Japanese', async () => {
+  assert.deepEqual(releaseNotes('<!-- notes:en -->\nHello\n<!-- notes:ja -->\n日本語'), { en: 'Hello', ja: '日本語' })
+  assert.deepEqual(releaseNotes('<!-- notes:zh -->\n中文\n<!-- notes:en -->\nHello'), { zh: '中文', en: 'Hello' })
+  assert.deepEqual(releaseNotes('see `<!-- notes:en -->` and `<!-- notes:ja -->` inline'), { ja: 'see `<!-- notes:en -->` and `<!-- notes:ja -->` inline' })
+  assert.deepEqual(releaseNotes('<!-- notes:en -->\nSee `<!-- notes:ja -->` here\n<!-- notes:ja -->\n日本語'), { en: 'See `<!-- notes:ja -->` here', ja: '日本語' })
+  assert.deepEqual(releaseNotes('日本語だけ'), { ja: '日本語だけ' })
+  assert.deepEqual(releaseNotes('  '), {})
+  const body = await readFile(new URL('../docs/release-0.4.2.md', import.meta.url), 'utf8')
+  const notes = releaseNotes(body)
+  const enAt = body.indexOf('# v0.4.2 — PWA & Mobile')
+  const jaAt = body.indexOf('# v0.4.2 — PWA・モバイル')
+  const jaMark = body.indexOf('<!-- notes:ja -->')
+  assert.equal(notes.en, body.slice(enAt, jaMark).trim())
+  assert.equal(notes.ja, body.slice(jaAt).trim())
+  assert.equal(notes.zh, undefined)
+  assert.match(notes.en, /^# v0\.4\.2 — PWA & Mobile/)
+  assert.match(notes.en, /## Known issues/)
+  assert.match(notes.ja, /^# v0\.4\.2 — PWA・モバイル/)
+  assert.match(notes.ja, /## 既知の問題/)
+  assert.equal(notes.en.includes('# v0.4.2 — PWA・モバイル'), false)
+  const enPnpm = notes.en.split('\n').filter(line => line.includes('pnpm 12'))
+  const jaPnpm = notes.ja.split('\n').filter(line => line.includes('pnpm 12'))
+  assert.equal(enPnpm.length, 1)
+  assert.equal(jaPnpm.length, 1)
+  assert.equal(/[\u3040-\u30ff\u4e00-\u9fff]/.test(enPnpm[0]), false)
+  assert.match(enPnpm[0], /ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION/)
+  assert.match(enPnpm[0], /24 hours/)
+  assert.match(enPnpm[0], /node_modules/)
+  assert.match(enPnpm[0], /does not restore DSH/)
+  assert.match(enPnpm[0], /Add and update plugins with pnpm 10/)
+  assert.match(enPnpm[0], /dsh plugin --profile web install/)
+  assert.match(enPnpm[0], /ERR_PNPM_UNEXPECTED_STORE/)
+  assert.match(jaPnpm[0], /pnpm 12 でプラグインを追加・更新すると/)
+  const marked = '<!-- notes:en -->\nHello\n<!-- notes:ja -->\n日本語'
+  const candidate = releaseCandidate({ ...release, body: marked }, '0.0.0')
+  assert.equal(typeof candidate.notes, 'string')
+  assert.equal(candidate.notes, marked)
+  assert.deepEqual(candidate.notesByLocale, { en: 'Hello', ja: '日本語' })
+  const long = `y${'あ'.repeat(6000)}`
+  const cut = releaseCandidate({ ...release, body: long }, '0.0.0')
+  assert.equal(typeof cut.notes, 'string')
+  assert.equal(cut.notes, long.slice(0, 6000))
+  assert.equal(cut.notes.length, 6000)
+  assert.equal(cut.notesByLocale.ja, long.slice(0, 6000))
+})
+
+test('installing 0.4.0 again after a finished update still allows a check', async t => {
+  const { updater, bundle, directory, manager } = await fixture(t)
+  const checked = await updater.check()
+  const id = randomUUID()
+  await updater.begin(checked.candidate.id, id, updater.base().profileKey)
+  await settle(updater)
+  bundle.version = version
+  const restarted = new PluginUpdates({ manager: () => manager, profileDir: directory, version, runtimeVersion: async () => '0.2.1-alpha.2' })
+  t.after(() => restarted.dispose())
+  assert.equal((await restarted.reconcile(id)).status, 'applied')
+  assert.equal(await restarted.lastOperation(), undefined)
+  bundle.version = '0.2.0'
+  const downgraded = new PluginUpdates({ manager: () => manager, profileDir: directory, version: '0.2.0', runtimeVersion: async () => '0.2.1-alpha.2', fetcher })
+  t.after(() => downgraded.dispose())
+  assert.equal((await downgraded.reconcile(id)).status, 'idle')
+  const again = await downgraded.check()
+  assert.equal(again.status, 'available')
+  assert.equal(again.candidate.version, version)
+  assert.equal(typeof again.candidate.notes, 'string')
+  assert.equal(again.candidate.notes, 'Changes')
+  assert.deepEqual(again.candidate.notesByLocale, { ja: 'Changes' })
 })

@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { chromium } from 'playwright'
+import { headerBackgroundOpaque, messageHeaderOverlap } from './landscape-overlap.mjs'
 const world = await mkdtemp(join(tmpdir(), 'dsh-pwa-smoke-'))
 // Local Anthropic-format stub: one fixed Markdown reply with a wide table. No model API is called.
 const reply = '| Column A | Column B | A much longer column C | Column D |\n| --- | --- | --- | --- |\n| 1 | value | a long cell that needs more than the narrow phone width | ok |\n\nEnd of fixture reply.'
@@ -28,16 +29,19 @@ const modelUrl = `http://127.0.0.1:${stub.address().port}`
 const env = { ...process.env, DSH_HOME: world, DSH_TELEMETRY_MODE: 'DISABLED', DEEPSEEK_API_KEY: 'pwa-smoke-fixture-key', DEEPSEEK_BASE_URL: modelUrl, DEEPSEEK_SEARCH_BASE_URL: 'http://127.0.0.1:9' }
 const manifest = JSON.parse(await readFile('package.json', 'utf8'))
 const source = process.argv[2] ?? resolve(`dsh-pwa-${manifest.version}.tgz`)
+// Japanese UI comes from dsh-japanese 0.2.3 (84776d7). The test only selects ja; it does not define it.
+const japanese = process.argv[3] ?? process.env.DSH_JAPANESE_SOURCE ?? 'github:Aero123421/dsh-japanese#84776d736e1020b950135c95cf16b33ff1e2a092'
 const profile = 'pwa-update-smoke'
 function command(args) {
   const result = spawnSync('dsh', args, { env, encoding: 'utf8', timeout: 240000 })
   if (result.status !== 0) { void writeFile(join(world, 'command.log'), result.stdout + result.stderr); throw new Error(`DSH command failed; evidence ${world}`) }
 }
 command(['--profile', profile, '--from-default-profile', 'web', '--dump-config'])
+command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', japanese])
 command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', source])
 const profileFile = join(world, 'profiles', profile, 'package.json')
 const settings = JSON.parse(await readFile(profileFile, 'utf8'))
-settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-pwa'])]
+settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-japanese', 'dsh-pwa'])]
 await writeFile(profileFile, JSON.stringify(settings, null, 2))
 let browser
 try {
@@ -74,6 +78,7 @@ try {
             if (registration.id === 'dsh-pwa') {
               const factory = registration.factory
               registration = { ...registration, factory(require) {
+                window.__pwaTestRequire = require
                 const exports = factory(require), original = exports.apply
                 exports.apply = ctx => { window.__pwaTestContext = ctx; window.__pwaTestExports = exports; return original(ctx) }
                 return exports
@@ -90,10 +95,11 @@ try {
       await page.waitForFunction(() => !!window.__pwaTestContext)
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' })
+        const ja = locale.getSnapshot().locales.find(language => language.id === 'ja')
+        if (!ja || ja.label !== '日本語') throw new Error('dsh-japanese did not register ja')
         locale.setLocale('ja')
       })
-      const onboarding = page.getByRole('button', { name: 'Configure later', exact: true })
+      const onboarding = page.getByRole('button', { name: /^(Configure later|あとで設定)$/ })
       if (await onboarding.waitFor({ state: 'visible', timeout: 6000 }).then(() => true, () => false)) await onboarding.click()
       // The account launcher replaces the sidebar Settings button. Its accessible
       // name is "Account menu" and the visible label is More. Settings is a
@@ -104,15 +110,84 @@ try {
           await direct.click()
           return
         }
-        const trigger = page.getByRole('button', { name: /^(Account menu|账号菜单)$/ }).filter({ visible: true })
+        const trigger = page.getByRole('button', { name: /^(Account menu|账号菜单|アカウントメニュー)$/ }).filter({ visible: true })
         if (await trigger.count()) await trigger.click()
-        else await page.locator('button:visible').filter({ hasText: /^(More|更多)$/ }).click()
+        else await page.locator('button:visible').filter({ hasText: /^(More|更多|詳細)$/ }).click()
         await page.getByRole('menuitem', { name: /^(Settings|設定|设置)$/ }).click()
       }
       await openSettings()
       await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       const panel = page.locator('.dsh-pwa-updates')
       await panel.getByText(`プラグインの実行版: ${manifest.version}`, { exact: true }).waitFor()
+      assert.equal(/\benable\b/.test(await panel.innerText()), false, 'the update page does not show a stage name')
+      const zhCopy = await page.evaluate(() => window.__pwaTestExports.copy?.zh?.updates ?? '')
+      const noteLocales = [
+        ['en', 'English notes', 'Keep', 'https://example.com/dsh-pwa', 'Plugin updates'],
+        ['ja', '日本語ノート', '残す', null, 'プラグインの更新'],
+        ['zh', zhCopy ? '中文笔记' : 'English notes', zhCopy ? '保留' : 'Keep', zhCopy ? null : 'https://example.com/dsh-pwa', zhCopy || 'Plugin updates'],
+      ]
+      for (const [localeId, heading, strong, link, updatesHeading] of noteLocales) {
+        await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
+        if (localeId === 'zh') {
+          assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN', 'the built-in zh language sets the document language to zh-CN')
+        }
+        const localized = await page.waitForFunction(expected => {
+          const text = document.querySelector('.dsh-pwa-updates')?.innerText ?? ''
+          const japaneseHeading = text.includes('プラグインの更新')
+          const ready = text.includes(expected) && !text.includes('dsh.pwa') && (expected === 'プラグインの更新' || !japaneseHeading)
+          return ready ? text : false
+        }, updatesHeading).then(handle => handle.jsonValue())
+        assert.equal(localized.includes('dsh.pwa'), false, `${localeId} must not show message keys`)
+        if (!zhCopy && localeId !== 'ja') assert.equal(localized.includes('プラグインの更新'), false, `${localeId} showed:\n${localized.slice(0, 400)}`)
+        const rendered = await page.evaluate(localeId => {
+          const logs = []
+          const report = console.error
+          console.error = (...args) => { logs.push(args.map(item => String(item?.message ?? item)).join(' ')); report.apply(console, args) }
+          try {
+            const React = window.__pwaTestRequire('react')
+            const ReactDOM = window.__pwaTestRequire('react-dom')
+            const { createRoot } = window.__pwaTestRequire('react-dom/client')
+            const { ReleaseNotes, notesForLocale } = window.__pwaTestExports
+            document.querySelector('.dsh-pwa-notes-probe')?.__pwaNotesRoot?.unmount()
+            document.querySelector('.dsh-pwa-notes-probe')?.remove()
+            const notes = { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**', ...(window.__pwaTestExports.copy?.zh ? { zh: '## 中文笔记\n\n- **保留**' } : {}) }
+            const markdown = notesForLocale(notes, localeId)
+            const host = document.createElement('div')
+            host.className = 'dsh-pwa-notes-probe'
+            const dialog = document.querySelector('[role=dialog]')
+            ;(dialog?.querySelector('[class]') ?? document.body).prepend(host)
+            const root = createRoot(host)
+            host.__pwaNotesRoot = root
+            ReactDOM.flushSync(() => root.render(React.createElement('div', { className: 'dsh-pwa-notes' }, markdown ? React.createElement(ReleaseNotes, { markdown }) : 'NO-NOTES')))
+            return { html: host.innerHTML, text: host.innerText, logs }
+          } catch (error) {
+            return { html: '', text: '', logs: [...logs, error.message] }
+          } finally { console.error = report }
+        }, localeId)
+        assert.equal(rendered.logs.join('\n'), '', `notes render failed for ${localeId}: ${rendered.html}`)
+        const probe = page.locator('.dsh-pwa-notes-probe')
+        await probe.getByRole('heading', { name: heading, exact: true }).waitFor()
+        assert.equal(await probe.locator('strong').innerText(), strong)
+        if (link) assert.equal(await probe.locator('a').getAttribute('href'), link)
+        else assert.equal(await probe.locator('a').count(), 0)
+        const probeText = await probe.innerText()
+        assert.equal(probeText.includes('##'), false)
+        assert.equal(probeText.includes('**'), false)
+        assert.equal(/\benable\b/.test(probeText), false, `stage name stays off the page in ${localeId}`)
+        await page.screenshot({ path: join(world, `notes-${localeId}.png`), animations: 'disabled' })
+      }
+      await page.evaluate(() => {
+        const host = document.querySelector('.dsh-pwa-notes-probe')
+        const plain = window.__pwaTestExports.notesForLocale('日本語だけ', 'zh')
+        if (plain !== '') throw new Error('unmarked Japanese notes were shown outside ja')
+        host?.__pwaNotesRoot?.unmount(); host?.remove()
+        const locale = window.__pwaTestContext.locale
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
+        locale.setLocale('ja')
+      })
+      const check = panel.getByRole('button', { name: '更新を確認', exact: true })
+      await check.waitFor()
+      assert.equal(await check.isEnabled(), true, 'Check for updates stays enabled when this install is not mid-update')
       const state = await page.evaluate(async () => {
         const method = 'dsh-pwa/update-status'
         return (await fetch(`/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'client-request', rpcId: 'smoke', method, payload: {} }) })).json()
@@ -134,6 +209,7 @@ try {
       assert.equal(JSON.parse(selected.data).short_name, 'DSH')
       assert.equal(await page.locator('link[rel=manifest]').count(), 1)
       assert.match(await page.locator('meta[name=viewport]').getAttribute('content'), /viewport-fit=cover/)
+      assert.equal(await page.locator('meta[name="theme-color"][media="(prefers-color-scheme: light)"]').getAttribute('content'), '#ffffff')
       await page.locator('.dsh-pwa-install').getByText('manifestとホーム画面用アイコンを取得できました。', { exact: true }).waitFor()
       assert.ok(await page.locator('.dsh-pwa-identity img').evaluate(async image => { await image.decode(); return image.naturalWidth === 180 }))
       // A late enable must repair head metadata without a full document reload.
@@ -183,14 +259,18 @@ try {
       await page.setViewportSize({ width: 390, height: 900 }); await active(false)
       await page.reload(); await page.waitForFunction(() => window.__pwaTestContext?.get('sessions')?.list.getSnapshot().phase === 'ready'); await active(false)
       assert.equal(await page.locator('.dsh-pwa-menu').count(), 0)
-      await page.evaluate(() => { const locale = window.__pwaTestContext.locale; if (!locale.getSnapshot().locales.some(x => x.id === 'ja')) locale.addLanguage({ id: 'ja', label: '日本語', fallback: 'en' }); locale.setLocale('ja') })
+      await page.evaluate(() => {
+        const locale = window.__pwaTestContext.locale
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
+        locale.setLocale('ja')
+      })
       await openSettings()
       await page.getByRole('dialog').getByText('PWA・モバイル', { exact: true }).first().click()
       await mobile.getByRole('button', { name: '自動', exact: true }).click(); await active(true)
       assert.ok((await panel.innerText()).includes('ホーム画面'))
       await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({ state: 'hidden' })
       assert.equal(await page.locator('vite-error-overlay,nextjs-portal').count(), 0)
-      const menu = page.getByRole('button', { name: 'サイドバーを開く', exact: true })
+      const menu = page.locator('button.dsh-pwa-menu').first()
       async function drawer() {
         await menu.click()
         await page.waitForFunction(() => { const side = document.querySelector('[data-slot=root]>div>div:has(>[data-slot=sidebar])'); return side?.getBoundingClientRect().x >= -.5 })
@@ -202,14 +282,46 @@ try {
       }
       await page.setViewportSize({ width: 390, height: 900 })
       await drawer()
+      await page.evaluate(() => {
+        const dialog = document.createElement('div')
+        dialog.id = 'pwa-non-modal-dialog'
+        dialog.setAttribute('role', 'dialog')
+        document.body.append(dialog)
+      })
+      const nonModal = await page.evaluate(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return { collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'), scrim: !!document.querySelector('.dsh-pwa-scrim') }
+      })
+      assert.equal(nonModal.collapsed, false, 'a dialog without aria-modal does not close the drawer')
+      assert.equal(nonModal.scrim, true)
+      await page.evaluate(() => document.getElementById('pwa-non-modal-dialog')?.remove())
       await page.keyboard.press('Escape'); await menu.waitFor()
+      await drawer()
+      await openSettings()
+      await page.getByRole('dialog').waitFor()
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame?.hasAttribute('data-sidebar-collapsed') && !document.querySelector('.dsh-pwa-scrim')
+      })
+      await page.screenshot({ path: join(world, 'drawer-closed-for-settings.png'), animations: 'disabled' })
+      await page.evaluate(() => window.__pwaTestContext.get('layout').toggleSidebar())
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame && !frame.hasAttribute('data-sidebar-collapsed') && document.querySelector('[role=dialog][aria-modal="true"]')
+      })
+      await page.screenshot({ path: join(world, 'drawer-open-under-settings.png'), animations: 'disabled' })
+      await page.keyboard.press('Escape')
+      await page.waitForFunction(() => {
+        const frame = document.querySelector('[data-slot=root] > div')
+        return frame?.hasAttribute('data-sidebar-collapsed') && !document.querySelector('.dsh-pwa-scrim') && !document.querySelector('[role=dialog][aria-modal="true"]')
+      })
       await drawer()
       await page.screenshot({ path: join(world, 'mobile-drawer-open.png'), animations: 'disabled' })
       // The header menu is behind the open drawer; the backdrop closes it.
       const scrim = page.getByRole('button', { name: 'サイドバーの背景を閉じる', exact: true })
       await scrim.click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).first().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).first().click(); await menu.waitFor()
       assert.equal(await page.locator('.dsh-pwa-toolbar').count(), 0, 'conversation views use the header menu, not the fallback toolbar')
       assert.equal(await page.locator('[data-conversation-header-leading] .dsh-pwa-menu-inline').count(), 1)
       // A normal-priority plugin must coexist with our fallback header contribution.
@@ -228,11 +340,11 @@ try {
       await page.evaluate(() => { window.__pwaOtherHeaderDispose(); delete window.__pwaOtherHeaderDispose })
       await page.locator('.dsh-pwa-menu-inline').waitFor()
       await page.locator('.dsh-pwa-toolbar').waitFor({ state: 'hidden' })
-      await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: 'プラグイン', exact: true }).click(); await menu.waitFor()
       await page.locator('.dsh-pwa-toolbar').waitFor()
       assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile-toolbar')), true, 'pages without a conversation header keep the toolbar')
-      await drawer(); await page.getByRole('button', { name: 'Plugins', exact: true }).click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: 'New session', exact: true }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: 'プラグイン', exact: true }).click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
       const id = await page.evaluate(async cwd => {
         const ctx = window.__pwaTestContext, workspace = await ctx.get('workspaces').create({ path: cwd })
         const id = await ctx.get('sessions').create({ workspaceId: workspace.workspaceId })
@@ -247,6 +359,74 @@ try {
         await page.locator('[data-composer-input]').fill('Show the fixture table.')
         await page.locator('[data-composer-input]').press('Enter')
         await page.getByText('End of fixture reply.', { exact: true }).waitFor({ timeout: 30000 })
+        await drawer()
+        await page.evaluate(sessionId => {
+          const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
+          const button = [...row.querySelectorAll('button')].find(item => /の操作$/.test(item.getAttribute('aria-label') ?? ''))
+          if (!button) throw new Error('session actions button missing')
+          button.click()
+        }, id)
+        await page.getByRole('menuitem', { name: '名前を変更', exact: true }).click()
+        await page.locator('[role=dialog][aria-modal="true"]').waitFor()
+        const rename = await page.evaluate(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const dialog = document.querySelector('[role=dialog][aria-modal="true"]')
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            settings: !!document.querySelector('[data-shortcut-modal=settings]'),
+            modal: dialog?.getAttribute('aria-modal') ?? '',
+          }
+        })
+        assert.equal(rename.settings, false, 'the rename dialog is not the settings screen')
+        assert.equal(rename.modal, 'true', 'the rename dialog is modal')
+        assert.equal(rename.collapsed, false, 'a rename dialog opened from the drawer leaves the drawer open')
+        assert.equal(rename.scrim, true, 'the drawer scrim stays while the rename dialog is open')
+        await page.screenshot({ path: join(world, 'drawer-rename-dialog.png'), animations: 'disabled' })
+        await page.keyboard.press('Escape')
+        await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal="true"]'))
+        const restored = await page.evaluate(sessionId => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const sidebar = document.querySelector('[data-slot=sidebar]')
+          const opener = document.querySelector(`[data-row-key="session:${sessionId}"] button`)
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            openerConnected: opener instanceof HTMLElement && opener.isConnected && !sidebar?.inert,
+          }
+        }, id)
+        assert.equal(restored.collapsed, false, 'closing the rename dialog leaves the drawer open')
+        assert.equal(restored.scrim, true)
+        assert.equal(restored.openerConnected, true, 'the drawer control that opened the dialog is still connected')
+        await page.evaluate(sessionId => {
+          const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
+          const title = [...row.querySelectorAll('span')].find(el => String(el.className).includes('title'))
+          if (!title) throw new Error('session title missing')
+          title.tabIndex = 0
+          title.focus()
+          title.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+        }, id)
+        await page.locator('[role=dialog][aria-modal="true"]').waitFor()
+        await page.waitForFunction(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          return frame && !frame.hasAttribute('data-sidebar-collapsed') && document.querySelector('.dsh-pwa-scrim')
+        })
+        await page.keyboard.press('Escape')
+        await page.waitForFunction(() => !document.querySelector('[role=dialog][aria-modal="true"]'))
+        const titleFocus = await page.evaluate(() => {
+          const frame = document.querySelector('[data-slot=root] > div')
+          const sidebar = document.querySelector('[data-slot=sidebar]')
+          const active = document.activeElement
+          return {
+            collapsed: !!frame?.hasAttribute('data-sidebar-collapsed'),
+            scrim: !!document.querySelector('.dsh-pwa-scrim'),
+            inSidebar: !!(sidebar && active && sidebar.contains(active)),
+          }
+        })
+        assert.equal(titleFocus.collapsed, false, 'a title rename leaves the drawer open')
+        assert.equal(titleFocus.scrim, true)
+        assert.equal(titleFocus.inSidebar, true, 'focus returns to the session title in the drawer')
+        await scrim.click(); await menu.waitFor()
         const table = page.locator('[data-conversation-content] .md-table-wide').first()
         await table.scrollIntoViewIfNeeded()
         assert.equal(await table.evaluate(el => getComputedStyle(el).overflowX), 'auto', 'wide tables scroll on touch screens without hover')
@@ -254,7 +434,7 @@ try {
         await page.screenshot({ path: join(world, 'mobile-table.png'), animations: 'disabled' })
       }
       const panelToggle = page.locator('[data-sidebar-right-panel][data-sidebar-right-open] button[data-sidebar-right-toggle]')
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
       await page.waitForFunction(() => { const p = document.querySelector('[data-sidebar-right-panel][data-sidebar-right-open]'); return p && p.getBoundingClientRect().right <= innerWidth + 1 })
       const right = await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').boundingBox()
@@ -262,9 +442,9 @@ try {
       await page.screenshot({ path: join(world, 'mobile-right-panel.png'), animations: 'disabled' })
       await panelToggle.click()
       await page.waitForFunction(() => !window.__pwaTestContext.get('sidebarRight').isExpanded())
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
-      await page.getByText('Workspace files', { exact: true }).click()
+      await page.getByText('ワークスペースのファイル', { exact: true }).click()
       await page.locator('[data-sidebar-right-panel] button[data-sidebar-right-toggle]').click()
       await menu.waitFor()
       await page.screenshot({ path: join(world, 'mobile-conversation.png'), animations: 'disabled' })
@@ -274,7 +454,7 @@ try {
       assert.equal(await page.locator('[data-slot=root]>div>div[data-side]').first().evaluate(el => getComputedStyle(el).display), 'none')
       await page.screenshot({ path: join(world, `mobile-drawer-dark-${restart}.png`), animations: 'disabled' })
       await scrim.click(); await menu.waitFor()
-      await page.getByRole('button', { name: 'Open right sidebar', exact: true }).click()
+      await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
       assert.equal(await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').evaluate(el => getComputedStyle(el).animationName), 'none')
       await page.screenshot({ path: join(world, `mobile-right-dark-${restart}.png`), animations: 'disabled' })
@@ -288,15 +468,78 @@ try {
       if (restart === 0) {
         // Auto mode treats a touch phone in landscape as mobile even though it is wider than 767px.
         const phone = await browser.newContext({ locale: 'ja-JP', viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true })
+        await phone.addInitScript(() => {
+          let current
+          Object.defineProperty(window, '__ModuleLoader__', { configurable: true, get: () => current, set(value) {
+            current = value
+            let load = value.load
+            Object.defineProperty(value, 'load', { configurable: true, get: () => function(registration) {
+              if (registration.id === 'dsh-pwa') {
+                const factory = registration.factory
+                registration = { ...registration, factory(require) {
+                  const exports = factory(require), original = exports.apply
+                  exports.apply = ctx => { window.__pwaTestContext = ctx; return original(ctx) }
+                  return exports
+                } }
+              }
+              return load.call(value, registration)
+            }, set(fn) { load = fn } })
+          } })
+        })
         try {
           const landscape = await phone.newPage()
           landscape.on('pageerror', error => errors.push(error.message))
           await landscape.goto(url)
+          await landscape.waitForFunction(() => window.__pwaTestContext?.get('sessions')?.list.getSnapshot().phase === 'ready')
+          const landscapeNotice = landscape.getByRole('button', { name: /Continue|继续|続ける/ }).first()
+          if (await landscapeNotice.waitFor({ state: 'visible', timeout: 4000 }).then(() => true, () => false)) await landscapeNotice.click()
+          await landscape.evaluate(sessionId => window.__pwaTestContext.get('uiWorkspace').openSession(sessionId), id)
+          await landscape.locator('[data-chat-flow-kind=user]').first().waitFor()
           await landscape.waitForFunction(() => document.documentElement.hasAttribute('data-dsh-mobile'))
-          await landscape.locator('.dsh-pwa-menu').first().waitFor()
-          const center = await landscape.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
-          assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - 844) < 1, 'single-column shell in landscape')
-          await landscape.screenshot({ path: join(world, 'mobile-landscape.png'), animations: 'disabled' })
+          for (const [width, height] of [[844, 390], [667, 375]]) {
+            await landscape.setViewportSize({ width, height })
+            await landscape.waitForFunction(() => document.documentElement.hasAttribute('data-dsh-mobile') && matchMedia('(pointer: coarse)').matches && matchMedia('(max-height: 500px)').matches)
+            await landscape.locator('.dsh-pwa-menu').first().waitFor()
+            const center = await landscape.locator('[data-slot=root]>div>div:has(>[data-slot=main])').boundingBox()
+            assert.ok(Math.abs(center.x) < 1 && Math.abs(center.width - width) < 1, `single-column shell in landscape ${width}x${height}`)
+            const samples = await landscape.evaluate(() => {
+              const headerEl = document.querySelector('[data-slot="conversation.header"] > header')
+              const scrollEl = document.querySelector('[data-conversation-scroll]')
+              const box = el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right } }
+              const shots = []
+              for (const top of [0, 48, scrollEl.scrollHeight]) {
+                scrollEl.scrollTop = top
+                shots.push({
+                  header: box(headerEl),
+                  scroll: box(scrollEl),
+                  messages: [...document.querySelectorAll('[data-chat-flow-kind]')].map(box),
+                  background: getComputedStyle(headerEl).backgroundColor,
+                })
+              }
+              scrollEl.scrollTop = 48
+              const header = headerEl.getBoundingClientRect()
+              const title = headerEl.querySelector('nav')?.getBoundingClientRect().width ?? 0
+              const buttons = [...headerEl.querySelectorAll('button')].filter(button => !button.closest('[data-conversation-tabs]') && !button.classList.contains('dsh-pwa-menu')).map(button => button.getBoundingClientRect().width)
+              return { shots, title, standard: Math.max(0, ...buttons), headerHeight: header.height }
+            })
+            assert.ok(samples.headerHeight <= 48, `landscape header stays one row at ${width}px: ${samples.headerHeight}`)
+            assert.ok(samples.title >= 80, `session title keeps its width at ${width}px: ${samples.title}`)
+            assert.ok(samples.standard >= 28, `Standard mode keeps its width at ${width}px: ${samples.standard}`)
+            for (const shot of samples.shots) {
+              const headerOpaque = headerBackgroundOpaque(shot.background)
+              for (const message of shot.messages) {
+                const area = messageHeaderOverlap({ header: shot.header, scroll: shot.scroll, message, headerOpaque })
+                assert.equal(area, 0, `header overlaps a message at ${width}x${height} (opaque ${headerOpaque})`)
+              }
+            }
+            const tabs = landscape.locator('[data-conversation-tabs] [role=tab]')
+            assert.equal(await tabs.count(), 2)
+            await tabs.nth(1).click()
+            await landscape.waitForFunction(() => document.querySelectorAll('[data-conversation-tabs] [role=tab]')[1]?.getAttribute('aria-selected') === 'true')
+            await tabs.nth(0).click()
+            await landscape.waitForFunction(() => document.querySelectorAll('[data-conversation-tabs] [role=tab]')[0]?.getAttribute('aria-selected') === 'true')
+            await landscape.screenshot({ path: join(world, `mobile-landscape-${width}x${height}.png`), animations: 'disabled' })
+          }
         } finally { await phone.close() }
       }
       assert.equal(errors.length, 0, errors.join('\n'))
@@ -307,7 +550,7 @@ try {
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'wide table scroll, landscape phone, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via dsh-japanese 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'rename dialog keeps the drawer, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }

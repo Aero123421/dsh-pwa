@@ -196,7 +196,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         try { pending = this.key() && this.storage?.getItem(this.key()) } catch {}
         if (!state.requestId && pending && state.status !== 'blocked') state = await this.call('reconcile', { requestId: pending })
         if (this.closed || generation !== this.generation) return
-        if (state.requestId) this.remember(state.requestId)
+        const quiet = ['applied', 'failed', 'cancelled', 'overridden', 'idle', 'current', 'no-release', 'available', 'blocked'].includes(state.status)
+        if (state.requestId && !quiet) this.remember(state.requestId)
+        else if (quiet) {
+          this.requestId = undefined
+          try { const key = this.key(); if (key) this.storage?.removeItem(key) } catch {}
+        }
         this.publish(state)
         if (['preparing', 'installing'].includes(state.status)) this.timer = setTimeout(() => { void this.load() }, 800)
       } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network' }) }
@@ -407,7 +412,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     .dsh-pwa-segment button[aria-pressed=true]{background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-weight:500;box-shadow:0 1px 2px #0000001f,0 0 0 .5px var(--dsw-alias-border-l3)}
     .dsh-pwa-segment button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}
     @media (hover:hover){.dsh-pwa-segment button[aria-pressed=false]:hover{color:var(--dsw-alias-label-primary)}}
-    .dsh-pwa-notes{display:grid;gap:4px;white-space:pre-wrap}
+    .dsh-pwa-notes{display:grid;gap:8px;min-width:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px}
+    .dsh-pwa-notes :is(h3,h4,p,ul,pre){margin:0}
+    .dsh-pwa-notes h3,.dsh-pwa-notes h4{color:var(--dsw-alias-label-primary);font-size:13px;font-weight:500;line-height:20px}
+    .dsh-pwa-notes ul{padding-left:1.1em}
+    .dsh-pwa-notes a{color:var(--dsw-alias-link);text-decoration:none}
+    .dsh-pwa-notes a:hover{text-decoration:underline}
+    .dsh-pwa-notes code,.dsh-pwa-notes pre{font-family:var(--dsh-font-family-code,ui-monospace,monospace)}
+    .dsh-pwa-notes pre{overflow:auto;padding:8px;border-radius:8px;background:var(--dsw-alias-bg-module-platform)}
     .dsh-pwa-link{justify-self:start;color:var(--dsw-alias-link);font-size:12px;line-height:18px;text-decoration:none}
     .dsh-pwa-link:hover{text-decoration:underline}
   `
@@ -446,6 +458,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const originalInert = new Map([center, sidebar].filter(Boolean).map(el => [el, el.inert]))
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
       let previous = null, timer
+      let drawerOpener = null
       const sync = () => {
         const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
         mobile.chrome.set({ open: next })
@@ -454,10 +467,21 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         // Return focus only when it was inside the surface that is closing.
         if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
         if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) mobile.focusMenu()
+        if (next !== 'left') { closing = false; clearTimeout(closingTimer); drawerOpener = null }
         if (previous === 'left' && next === 'right') close()
         previous = next
       }
-      const close = () => { if (isOpen()) toggleSidebar(ctx) }
+      // Hold the guard until the collapsed attribute updates. A second toggle in the
+      // same turn (route observer plus the session click) would otherwise reopen it.
+      let closing = false
+      let closingTimer
+      const close = () => {
+        if (!isOpen() || closing) return
+        closing = true
+        clearTimeout(closingTimer)
+        closingTimer = setTimeout(() => { closing = false }, 500)
+        toggleSidebar(ctx)
+      }
       // Observe geometry only, not streaming messages or the conversation subtree.
       const watch = new MutationObserver(sync)
       watch.observe(frame, { attributes: true, attributeFilter: ['data-sidebar-collapsed'] })
@@ -465,25 +489,133 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const info = ctx.get?.('layout')?.panelInfo
       let panel = info?.getSnapshot().activePanelId
       const offPanel = info?.subscribe(() => { const next = info.getSnapshot().activePanelId; if (next !== panel) { panel = next; close() } })
+      // A menu portaled out of the sidebar is still a drawer action (rename, confirm).
+      let fromDrawer = false
+      let dialogFromDrawer = false
+      let drawerFocusAt = 0
+      const rememberOpener = target => {
+        if (!target?.closest?.('[data-slot=sidebar]')) return
+        const control = target.closest?.('button, a, input, textarea, select, [tabindex]')
+        if (control instanceof HTMLElement) drawerOpener = control
+      }
+      const noteDrawerGesture = event => {
+        fromDrawer = !!event.target?.closest?.('[data-slot=sidebar], [role=menu]')
+        rememberOpener(event.target)
+      }
+      const noteDrawerFocus = event => {
+        const sidebar = document.querySelector('[data-slot=sidebar]')
+        if (sidebar?.contains(event.target)) drawerFocusAt = Date.now()
+        rememberOpener(event.target)
+      }
+      const focusInSidebar = () => {
+        const sidebar = document.querySelector('[data-slot=sidebar]')
+        const focused = !!(sidebar && document.activeElement && sidebar.contains(document.activeElement))
+        // The dialog moves focus before the mutation observer runs, so the recent sidebar focus still counts.
+        return focused || Date.now() - drawerFocusAt < 1000
+      }
       const onClick = event => {
+        noteDrawerGesture(event)
+        rememberOpener(event.target)
         const target = event.target
         if (!target.closest?.('[data-slot=sidebar]')) return
         const newSession = target.closest('button')?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
         const nav = target.closest('nav button')
         const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
-        if (newSession || nav || session) { clearTimeout(timer); timer = setTimeout(close) }
+        // The second click of a title double-click opens rename. Leave the drawer up.
+        if (event.detail > 1) { clearTimeout(timer); return }
+        if (newSession || nav) { clearTimeout(timer); timer = setTimeout(close) }
+        else if (session) { clearTimeout(timer); timer = setTimeout(close, 400) }
+      }
+      const onDialog = node => {
+        if (!openedDialog(node)) return
+        if (drawerDialogKeepsDrawer({ settings: settingsDialog(node), modal: true, fromDrawer, focusInSidebar: focusInSidebar() })) {
+          dialogFromDrawer = true
+          clearTimeout(timer)
+          armDialogWatch()
+          return
+        }
+        dialogFromDrawer = false
+        if (drawerShouldClose({ open: isOpen(), modal: true })) close()
       }
       const onKey = event => {
-        // Portalled menus/dialogs own Escape before our drawer does.
-        if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[role=dialog],[role=menu]')) return
+        if (event.key !== 'Escape') return
+        const modal = !!document.querySelector('[role=dialog][aria-modal="true"]')
+        const menuOpen = !!document.querySelector('[role=menu]')
+        // Settings still closes with the drawer. A dialog opened from the drawer stays, so focus can return.
+        if (modal) {
+          if (!dialogFromDrawer && drawerShouldClose({ open: isOpen(), modal: true })) close()
+          return
+        }
+        if (menuOpen || event.defaultPrevented) return
         if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
+      document.addEventListener('pointerdown', noteDrawerGesture, true)
+      document.addEventListener('focusin', noteDrawerFocus, true)
       document.addEventListener('click', onClick, true)
-      document.addEventListener('keydown', onKey)
+      window.addEventListener('keydown', onKey, true)
+      const restoreDrawerFocus = () => {
+        const opener = drawerOpener
+        const back = () => {
+          if (document.querySelector('[role=dialog][aria-modal="true"]')) return
+          if (!(opener instanceof HTMLElement) || !opener.isConnected || opener.closest('[inert]')) return
+          // The row action is display:none until the row is hovered, and a collapsed copy of the row has no box. Focus the visible title.
+          const key = opener.closest('[data-row-key]')?.getAttribute('data-row-key')
+          const visibleRow = key ? [...document.querySelectorAll(`[data-row-key="${CSS.escape(key)}"]`)].find(el => el.getClientRects().length > 0) : null
+          const title = visibleRow?.querySelector('span')
+          const place = opener.getClientRects().length > 0 ? opener : title
+          if (!(place instanceof HTMLElement) || place.getClientRects().length === 0) return
+          if (!place.hasAttribute('tabindex') && place !== opener) place.setAttribute('tabindex', '-1')
+          place.focus({ preventScroll: true })
+        }
+        // The menu item DSH would restore is already gone, and the sidebar can still be inert in the same turn.
+        back()
+        requestAnimationFrame(back)
+        setTimeout(back, 0)
+      }
+      let dialogWatch
+      const armDialogWatch = () => {
+        dialogWatch?.disconnect()
+        dialogWatch = new MutationObserver(() => {
+          if (document.querySelector('[role=dialog][aria-modal="true"]')) return
+          dialogWatch?.disconnect()
+          if (!dialogFromDrawer) return
+          dialogFromDrawer = false
+          restoreDrawerFocus()
+        })
+        dialogWatch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['role', 'aria-modal'] })
+      }
+      const onBody = records => {
+        for (const record of records) for (const node of record.addedNodes) onDialog(node)
+      }
+      const bodyWatch = new MutationObserver(onBody)
+      bodyWatch.observe(document.body, { childList: true })
+      const main = frame.querySelector('[data-slot=main]')
+      let route = `${location.pathname}${location.search}${location.hash}`
+      const onRoute = () => {
+        const next = `${location.pathname}${location.search}${location.hash}`
+        const moved = next !== route
+        route = next
+        if (moved && drawerShouldClose({ open: isOpen(), route: true })) close()
+      }
+      const onMain = () => { if (drawerShouldClose({ open: isOpen(), route: true })) close() }
+      const routeWatch = new MutationObserver(onMain)
+      if (main) routeWatch.observe(main, { childList: true })
+      const history = window.history
+      const pushState = history?.pushState, replaceState = history?.replaceState
+      if (pushState && replaceState) {
+        history.pushState = function (...args) { const result = pushState.apply(this, args); onRoute(); return result }
+        history.replaceState = function (...args) { const result = replaceState.apply(this, args); onRoute(); return result }
+      }
+      window.addEventListener('popstate', onRoute)
+      window.addEventListener('hashchange', onRoute)
+      if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) && !drawerDialogKeepsDrawer({ settings: settingsDialog(document.body), modal: true, focusInSidebar: focusInSidebar() }) })) close()
       sync()
       return () => {
-        clearTimeout(timer); watch.disconnect(); offPanel?.()
-        document.removeEventListener('click', onClick, true); document.removeEventListener('keydown', onKey)
+        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); dialogWatch?.disconnect(); routeWatch.disconnect()
+        document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
+        window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
+        if (pushState && history.pushState !== pushState) history.pushState = pushState
+        if (replaceState && history.replaceState !== replaceState) history.replaceState = replaceState
         for (const [el, inert] of originalInert) el.inert = inert
       }
     }, [active, ctx, locale, mobile])
@@ -504,6 +636,100 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         MODES.map(mode => h('button', { key: mode, type: 'button', 'aria-pressed': state.mode === mode, onClick: () => mobile.setMode(mode) }, t(`mobile.${mode}`)))),
       h('p', { className: 'dsh-pwa-state', role: 'status' }, t(state.active ? 'mobile.active' : 'mobile.inactive')))
   }
+  const DRAWER_CLOSE_DIALOG = '[data-shortcut-modal=settings], [role=dialog][aria-modal="true"]'
+  /** Settings, or a modal dialog. A dialog without aria-modal does not close the drawer. */
+  function openedDialog(node) {
+    if (!node || node.nodeType !== 1) return false
+    return node.matches?.(DRAWER_CLOSE_DIALOG) || !!node.querySelector?.(DRAWER_CLOSE_DIALOG)
+  }
+  function settingsDialog(node) {
+    if (!node || node.nodeType !== 1) return false
+    return node.matches?.('[data-shortcut-modal=settings]') || !!node.querySelector?.('[data-shortcut-modal=settings]')
+  }
+  /** A confirmation or rename dialog opened from the drawer keeps it, so focus can return. Settings still closes it. */
+  function drawerDialogKeepsDrawer({ settings = false, modal = false, fromDrawer = false, focusInSidebar = false } = {}) {
+    if (settings || !modal) return false
+    return fromDrawer || focusInSidebar
+  }
+  /** A finished update has no manager stage name. Other results may still show one. */
+  function showUpdateStage(state) {
+    return state?.status !== 'applied' && typeof state?.result?.stage === 'string' && state.result.stage.length > 0
+  }
+  /** Close the open drawer once for a route change, a modal dialog, or Escape. */
+  function drawerShouldClose({ open, modal = false, route = false, escape = false, menu = false }) {
+    if (!open) return false
+    if (modal || route) return true
+    return escape && !menu
+  }
+  /** notesByLocale wins. A string note, including one without markers, stays Japanese. A zh section is used for zh; otherwise the en section. */
+  function notesForLocale(notes, locale) {
+    const lang = String(locale ?? 'en').toLowerCase().split('-')[0]
+    const sections = notes && typeof notes === 'object' && notes.notesByLocale && typeof notes.notesByLocale === 'object'
+      ? notes.notesByLocale
+      : notes && typeof notes === 'object' && typeof notes.notes === 'string'
+        ? notes.notes
+        : notes
+    if (typeof sections === 'string') return lang === 'ja' ? sections : ''
+    if (!sections || typeof sections !== 'object') return ''
+    if (lang === 'ja' && sections.ja) return sections.ja
+    if (lang === 'zh' && sections.zh) return sections.zh
+    return sections.en || ''
+  }
+  function releaseNoteBlocks(markdown) {
+    const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+    const blocks = []
+    let para = [], list = [], code = null
+    const flushPara = () => { if (para.length) { blocks.push({ type: 'p', text: para.join(' ') }); para = [] } }
+    const flushList = () => { if (list.length) { blocks.push({ type: 'ul', items: list }); list = [] } }
+    for (const line of lines) {
+      if (code) {
+        if (line.startsWith('```')) { blocks.push({ type: 'pre', text: code.join('\n') }); code = null }
+        else code.push(line)
+        continue
+      }
+      if (line.startsWith('```')) { flushPara(); flushList(); code = []; continue }
+      const heading = /^(#{1,3})\s+(.*)$/.exec(line)
+      if (heading) { flushPara(); flushList(); blocks.push({ type: 'h', level: heading[1].length, text: heading[2].trim() }); continue }
+      const item = /^\s*[-*]\s+(.*)$/.exec(line)
+      if (item) { flushPara(); list.push(item[1].trim()); continue }
+      if (!line.trim()) { flushPara(); flushList(); continue }
+      flushList(); para.push(line.trim())
+    }
+    if (code) blocks.push({ type: 'pre', text: code.join('\n') })
+    flushPara(); flushList()
+    return blocks
+  }
+  function inlineParts(text) {
+    const parts = []
+    const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g
+    let cursor = 0, match
+    while ((match = pattern.exec(text))) {
+      if (match.index > cursor) parts.push({ type: 'text', text: text.slice(cursor, match.index) })
+      if (match[1]) parts.push({ type: 'a', text: match[1], href: match[2] })
+      else if (match[3]) parts.push({ type: 'strong', text: match[3] })
+      else parts.push({ type: 'code', text: match[4] })
+      cursor = match.index + match[0].length
+    }
+    if (cursor < text.length) parts.push({ type: 'text', text: text.slice(cursor) })
+    return parts
+  }
+  function inlineNodes(text, key) {
+    return inlineParts(text).map((part, index) => {
+      const id = `${key}-${index}`
+      if (part.type === 'a') return h('a', { key: id, href: part.href, target: '_blank', rel: 'noopener noreferrer' }, part.text)
+      if (part.type === 'strong') return h('strong', { key: id }, part.text)
+      if (part.type === 'code') return h('code', { key: id }, part.text)
+      return part.text
+    })
+  }
+  function ReleaseNotes({ markdown }) {
+    return releaseNoteBlocks(markdown).map((block, index) => {
+      if (block.type === 'h') return h(block.level === 1 ? 'h3' : 'h4', { key: index }, inlineNodes(block.text, index))
+      if (block.type === 'ul') return h('ul', { key: index }, block.items.map((item, itemIndex) => h('li', { key: itemIndex }, inlineNodes(item, `${index}-${itemIndex}`))))
+      if (block.type === 'pre') return h('pre', { key: index }, h('code', null, block.text))
+      return h('p', { key: index }, inlineNodes(block.text, index))
+    })
+  }
   function UpdateUI({ controller, locale }) {
     const state = React.useSyncExternalStore(controller.subscribe, controller.getSnapshot)
     const t = locale.bind(NS)
@@ -516,13 +742,15 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
       h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
-      state.candidate && h('div', { className: 'dsh-pwa-notes dsh-pwa-desc' }, h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`), h('p', null, state.candidate.notes)),
+      showUpdateStage(state) && h('p', { className: 'dsh-pwa-state' }, state.result.stage),
+      state.candidate && h('div', { className: 'dsh-pwa-notes' },
+        h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
+        notesForLocale(state.candidate, locale.getSnapshot().active) && h(ReleaseNotes, { markdown: notesForLocale(state.candidate, locale.getSnapshot().active) })),
       h('div', { className: 'dsh-pwa-actions' },
         h(Button, { size: 'sm', variant: 'outline', disabled: active || ['unknown', 'restart-required'].includes(state.status), onClick: () => { void controller.check() } }, t('check')),
         state.status === 'available' && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void controller.begin() } }, t('install')),
         state.status === 'unknown' && h(Button, { size: 'sm', variant: 'outline', onClick: () => { void controller.load() } }, t('reconcile'))),
       h('a', { className: 'dsh-pwa-link', href: 'https://github.com/Aero123421/dsh-pwa/releases', target: '_blank', rel: 'noopener noreferrer' }, t('manual')),
-      state.result?.stage && h('p', { className: 'dsh-pwa-desc' }, `${state.result.stage}${state.result.error?.code ? ` · ${state.result.error.code}` : ''}`),
       h('p', { className: 'dsh-pwa-desc' }, t('hint')))
   }
   function SettingsUI({ controller, mobile, install, locale }) {
@@ -567,5 +795,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
 } })

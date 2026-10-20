@@ -83,13 +83,39 @@ function updateRequestId(value) {
   if (typeof value !== 'string' || !UUID.test(value)) throw new Error('invalid-request')
   return value
 }
+/** Split a release body into UI languages. Only a whole-line marker starts a section. An unmarked body is the legacy Japanese note. */
+export function releaseNotes(body) {
+  const text = String(body ?? '').slice(0, 6000)
+  const marks = [...text.matchAll(/^[ \t]*<!--\s*notes:(en|ja|zh)\s*-->[ \t]*$/gim)]
+  if (!marks.length) {
+    const trimmed = text.trim()
+    return trimmed ? { ja: trimmed } : {}
+  }
+  const notes = {}
+  for (let i = 0; i < marks.length; i++) {
+    const lang = marks[i][1].toLowerCase()
+    const start = marks[i].index + marks[i][0].length
+    const end = i + 1 < marks.length ? marks[i + 1].index : text.length
+    const section = text.slice(start, end).trim()
+    if (section) notes[lang] = section
+  }
+  return notes
+}
+/** restart-required only while a newer bundle is installed and this process has not started it. A downgrade stays checkable. */
+export function viewStatus(installed, runtime) {
+  if (!installed || installed === runtime) return 'idle'
+  try { return compareVersions(installed, runtime) > 0 ? 'restart-required' : 'idle' }
+  catch { return 'idle' }
+}
 export function releaseCandidate(release, current) {
   if (!release || !Number.isSafeInteger(release.id) || release.id <= 0 || release.draft !== false || release.prerelease !== false || typeof release.tag_name !== 'string' || !release.tag_name.startsWith('v')) throw new Error('metadata')
   const version = release.tag_name.slice(1)
   if (semanticVersion(version).pre) throw new Error('channel')
   const expectedLink = `${RELEASES}/tag/${release.tag_name}`
   if (release.html_url !== expectedLink || typeof release.body !== 'string' || (release.assets !== undefined && !Array.isArray(release.assets))) throw new Error('metadata')
-  const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes: release.body.slice(0, 6000) }
+  const notes = release.body.slice(0, 6000)
+  // Published 0.4.0 and 0.4.1 clients render notes as a React child, so it stays a string.
+  const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes, notesByLocale: releaseNotes(notes) }
   return compareVersions(version, current) > 0 ? candidate : null
 }
 const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
@@ -258,7 +284,7 @@ export class PluginUpdates {
   async status() { try {
     const { dshVersion, bundle } = await this.capability()
     const requestId = this.running?.requestId ?? await this.lastOperation()
-    return requestId ? { ...(await this.reconcile(requestId)), dshVersion } : { ...this.base(), dshVersion, installedVersion: bundle.version, status: bundle.version === this.version ? 'idle' : 'restart-required' }
+    return requestId ? { ...(await this.reconcile(requestId)), dshVersion } : { ...this.base(), dshVersion, installedVersion: bundle.version, status: viewStatus(bundle.version, this.version) }
   } catch (error) { return { ...this.base(), status: 'blocked', reason: reasonOf(error) } } }
   async privateDir() {
     await mkdir(this.cacheDir, { recursive: true, mode: 0o700 })
@@ -293,12 +319,12 @@ export class PluginUpdates {
         const last = await this.lastOperation()
         if (last && ['installing', 'unknown', 'restart-required'].includes((await this.reconcile(last)).status)) throw new Error('busy')
         this.candidate = await this.getCandidate(bundle.version ?? this.version)
-        return { ...this.base(), installedVersion: bundle.version, status: this.candidate ? 'available' : bundle.version === this.version ? 'current' : 'restart-required', candidate: this.candidate && this.publicCandidate(this.candidate), checkedAt: new Date().toISOString() }
+        return { ...this.base(), installedVersion: bundle.version, status: this.candidate ? 'available' : viewStatus(bundle.version, this.version) === 'restart-required' ? 'restart-required' : bundle.version === this.version ? 'current' : 'idle', candidate: this.candidate && this.publicCandidate(this.candidate), checkedAt: new Date().toISOString() }
       } catch (error) { this.candidate = null; return { ...this.base(), status: error.message === 'release-unavailable' ? 'no-release' : 'blocked', reason: reasonOf(error) } }
     })().finally(() => { this.checking = null })
     return this.checking
   }
-  publicCandidate(candidate) { const { id, version, url, notes, compatibility } = candidate; return { id, version, url, notes, compatibility } }
+  publicCandidate(candidate) { const { id, version, url, notes, notesByLocale, compatibility } = candidate; return { id, version, url, notes, notesByLocale, compatibility } }
   async begin(id, operationId, profileKey) {
     if (!profileKey || profileKey !== this.base().profileKey) throw new Error('invalid-request')
     if (typeof operationId !== 'string') throw new Error('invalid-request')
@@ -381,12 +407,31 @@ export class PluginUpdates {
     }
     const bundle = (await this.manager()?.listBundles())?.find(item => item.name === PACKAGE)
     const installed = bundle?.version
+    const previouslyApplied = operation.status === 'applied'
     if (operation.result) operation.status = resultState(operation.result, operation.version, this.version, bundle)
     if (['installing', 'restart-required', 'unknown', 'applied'].includes(operation.status) && this.version === operation.version) {
       operation.status = bundle?.installed && !bundle.error && !bundle.readOnlyReason && installed === operation.version ? 'applied' : 'unknown'
     }
+    // Once this operation was applied, a later install of another version (for example 0.4.0 again)
+    // must not stay unknown. The saved record stays applied so the next reconcile still recognizes it.
+    // Clearing latest.json keeps an older build from replaying the id.
+    if (previouslyApplied && installed && installed !== operation.version) {
+      operation.status = 'applied'
+      await this.clearLatest(requestId)
+      return { ...this.base(), installedVersion: installed, status: viewStatus(installed, this.version) }
+    }
     await this.save(operation)
+    if (operation.status === 'applied') await this.clearLatest(requestId)
     return { ...this.base(), ...operation, installedVersion: installed }
+  }
+  async clearLatest(requestId) {
+    try {
+      if (await this.lastOperation() !== requestId) return
+      const directory = await this.privateDir()
+      const index = join(directory, `${randomUUID()}.tmp`)
+      await writeFile(index, '{}\n', { flag: 'wx', mode: 0o600 })
+      await rename(index, join(directory, 'latest.json'))
+    } catch { /* The operation file remains; an explicit reconcile can still read it. */ }
   }
   dispose() { this.closed = true; this.abort.abort() }
 }
