@@ -153,3 +153,5 @@ export function registerUpdateRoutes(ctx, updates) {
     })
   }
 }
+
+// addLanguage
