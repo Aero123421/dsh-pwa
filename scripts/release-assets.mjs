@@ -31,12 +31,27 @@ function main() {
     console.error('assets')
     process.exit(1)
   }
-  const list = gh(['release', 'list', '--json', 'tagName,isDraft'])
+  const list = gh(['release', 'list', '--limit', '1000', '--json', 'tagName,isDraft'])
   if (list.status !== 0) fail(list)
-  const releases = JSON.parse(list.stdout)
-  const match = Array.isArray(releases) ? releases.find(item => item.tagName === tag) : undefined
+  const listed = list.stdout ?? ''
+  if (listed.trim() === '') {
+    console.error('release list was empty')
+    process.exit(1)
+  }
+  let releases
+  try {
+    releases = JSON.parse(listed)
+  } catch {
+    console.error('release list was not valid JSON')
+    process.exit(1)
+  }
   if (!Array.isArray(releases)) {
-    console.error('release list')
+    console.error('release list was not an array')
+    process.exit(1)
+  }
+  const match = releases.find(item => item.tagName === tag)
+  if (!match && releases.length === 1000) {
+    console.error(`release list returned 1000 entries and did not include ${tag}; not creating a release`)
     process.exit(1)
   }
   const uploadNames = files.map(file => basename(file))
