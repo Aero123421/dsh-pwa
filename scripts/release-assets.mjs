@@ -2,11 +2,12 @@ import { spawnSync } from 'node:child_process'
 import { basename } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-/** A new Release is created as a draft. An existing Release only gains assets that are not already attached. */
-export function releaseAssetPlan({ releaseExists, existingNames, uploadNames }) {
-  if (!releaseExists) return { action: 'create' }
+/** Create a missing Release as a draft. A published Release is left untouched. A draft only gains new asset names. */
+export function releaseAssetPlan({ isDraft, existingNames = [], uploadNames }) {
+  if (isDraft === undefined) return { action: 'create' }
+  if (isDraft !== true) return { action: 'fail', reason: 'published' }
   const clash = uploadNames.filter(name => existingNames.includes(name))
-  if (clash.length) return { action: 'fail', clash }
+  if (clash.length) return { action: 'fail', reason: 'asset', clash }
   return { action: 'upload' }
 }
 
@@ -30,16 +31,27 @@ function main() {
     console.error('assets')
     process.exit(1)
   }
-  const view = gh(['release', 'view', tag, '--json', 'assets'])
-  const missing = view.status !== 0 && /not found/i.test(`${view.stderr}\n${view.stdout}`)
-  if (view.status !== 0 && !missing) fail(view)
-  const existingNames = missing ? [] : JSON.parse(view.stdout).assets.map(asset => asset.name)
-  const plan = releaseAssetPlan({
-    releaseExists: !missing,
-    existingNames,
-    uploadNames: files.map(file => basename(file)),
-  })
-  if (plan.action === 'fail') {
+  const list = gh(['release', 'list', '--json', 'tagName,isDraft'])
+  if (list.status !== 0) fail(list)
+  const releases = JSON.parse(list.stdout)
+  const match = Array.isArray(releases) ? releases.find(item => item.tagName === tag) : undefined
+  if (!Array.isArray(releases)) {
+    console.error('release list')
+    process.exit(1)
+  }
+  const uploadNames = files.map(file => basename(file))
+  if (match && match.isDraft !== true) {
+    console.error(`release ${tag} is already published and was left unchanged`)
+    process.exit(1)
+  }
+  let existingNames = []
+  if (match) {
+    const view = gh(['release', 'view', tag, '--json', 'assets'])
+    if (view.status !== 0) fail(view)
+    existingNames = JSON.parse(view.stdout).assets.map(asset => asset.name)
+  }
+  const plan = releaseAssetPlan({ isDraft: match ? match.isDraft : undefined, existingNames, uploadNames })
+  if (plan.action === 'fail' && plan.reason === 'asset') {
     console.error(`release asset already exists and was left unchanged: ${plan.clash.join(', ')}`)
     process.exit(1)
   }
