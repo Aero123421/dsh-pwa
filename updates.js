@@ -83,10 +83,10 @@ function updateRequestId(value) {
   if (typeof value !== 'string' || !UUID.test(value)) throw new Error('invalid-request')
   return value
 }
-/** Split a release body into UI languages. An unmarked body is the legacy Japanese note. */
+/** Split a release body into UI languages. Only a whole-line marker starts a section. An unmarked body is the legacy Japanese note. */
 export function releaseNotes(body) {
   const text = String(body ?? '').slice(0, 6000)
-  const marks = [...text.matchAll(/<!--\s*notes:(en|ja|zh)\s*-->/gi)]
+  const marks = [...text.matchAll(/^[ \t]*<!--\s*notes:(en|ja|zh)\s*-->[ \t]*$/gim)]
   if (!marks.length) {
     const trimmed = text.trim()
     return trimmed ? { ja: trimmed } : {}
@@ -113,7 +113,9 @@ export function releaseCandidate(release, current) {
   if (semanticVersion(version).pre) throw new Error('channel')
   const expectedLink = `${RELEASES}/tag/${release.tag_name}`
   if (release.html_url !== expectedLink || typeof release.body !== 'string' || (release.assets !== undefined && !Array.isArray(release.assets))) throw new Error('metadata')
-  const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes: releaseNotes(release.body) }
+  const notes = release.body.slice(0, 6000)
+  // Published 0.4.0 and 0.4.1 clients render notes as a React child, so it stays a string.
+  const candidate = { id: String(release.id), version, tag: release.tag_name, url: expectedLink, notes, notesByLocale: releaseNotes(notes) }
   return compareVersions(version, current) > 0 ? candidate : null
 }
 const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
@@ -322,7 +324,7 @@ export class PluginUpdates {
     })().finally(() => { this.checking = null })
     return this.checking
   }
-  publicCandidate(candidate) { const { id, version, url, notes, compatibility } = candidate; return { id, version, url, notes, compatibility } }
+  publicCandidate(candidate) { const { id, version, url, notes, notesByLocale, compatibility } = candidate; return { id, version, url, notes, notesByLocale, compatibility } }
   async begin(id, operationId, profileKey) {
     if (!profileKey || profileKey !== this.base().profileKey) throw new Error('invalid-request')
     if (typeof operationId !== 'string') throw new Error('invalid-request')

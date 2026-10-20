@@ -208,6 +208,12 @@ test('release notes follow the UI language and are not left as one raw markdown 
   assert.equal(notesForLocale(notes, 'ja-JP'), notes.ja)
   assert.equal(notesForLocale('日本語だけ', 'en'), '')
   assert.equal(notesForLocale('日本語だけ', 'ja'), '日本語だけ')
+  const published = { notes: '日本語だけ', notesByLocale: { en: '# Hello', ja: '# 日本語', zh: '# 中文' } }
+  assert.equal(notesForLocale(published, 'en'), '# Hello')
+  assert.equal(notesForLocale(published, 'ja-JP'), '# 日本語')
+  assert.equal(notesForLocale(published, 'zh-CN'), '# 中文')
+  assert.equal(notesForLocale({ notes: '日本語だけ' }, 'en'), '')
+  assert.equal(notesForLocale({ notes: '日本語だけ' }, 'ja'), '日本語だけ')
   const blocks = releaseNoteBlocks(notes.en)
   assert.equal(blocks.map(block => block.type).join(','), 'h,ul,p')
   assert.equal(inlineParts(blocks.items ? '' : 'See [notes](https://example.com/n)')[1].href, 'https://example.com/n')

@@ -661,14 +661,19 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     if (modal || route) return true
     return escape && !menu
   }
-  /** Legacy unmarked release text is Japanese. A zh section is used for zh; otherwise the en section. */
+  /** notesByLocale wins. A string note, including one without markers, stays Japanese. A zh section is used for zh; otherwise the en section. */
   function notesForLocale(notes, locale) {
     const lang = String(locale ?? 'en').toLowerCase().split('-')[0]
-    if (typeof notes === 'string') return lang === 'ja' ? notes : ''
-    if (!notes || typeof notes !== 'object') return ''
-    if (lang === 'ja' && notes.ja) return notes.ja
-    if (lang === 'zh' && notes.zh) return notes.zh
-    return notes.en || ''
+    const sections = notes && typeof notes === 'object' && notes.notesByLocale && typeof notes.notesByLocale === 'object'
+      ? notes.notesByLocale
+      : notes && typeof notes === 'object' && typeof notes.notes === 'string'
+        ? notes.notes
+        : notes
+    if (typeof sections === 'string') return lang === 'ja' ? sections : ''
+    if (!sections || typeof sections !== 'object') return ''
+    if (lang === 'ja' && sections.ja) return sections.ja
+    if (lang === 'zh' && sections.zh) return sections.zh
+    return sections.en || ''
   }
   function releaseNoteBlocks(markdown) {
     const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
@@ -740,7 +745,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       showUpdateStage(state) && h('p', { className: 'dsh-pwa-state' }, state.result.stage),
       state.candidate && h('div', { className: 'dsh-pwa-notes' },
         h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
-        notesForLocale(state.candidate.notes, locale.getSnapshot().active) && h(ReleaseNotes, { markdown: notesForLocale(state.candidate.notes, locale.getSnapshot().active) })),
+        notesForLocale(state.candidate, locale.getSnapshot().active) && h(ReleaseNotes, { markdown: notesForLocale(state.candidate, locale.getSnapshot().active) })),
       h('div', { className: 'dsh-pwa-actions' },
         h(Button, { size: 'sm', variant: 'outline', disabled: active || ['unknown', 'restart-required'].includes(state.status), onClick: () => { void controller.check() } }, t('check')),
         state.status === 'available' && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void controller.begin() } }, t('install')),
