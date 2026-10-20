@@ -38,7 +38,7 @@ test('the release workflow does not publish, edit notes, or replace assets', asy
   assert.doesNotMatch(sources[1], /release',\s*'edit'|release edit/)
 })
 
-async function fakeGh(dir, { listJson, viewJson = '{"assets":[]}' }) {
+async function fakeGh(dir, { listJson, viewJson = '{"assets":[]}', listStatus = 0, viewStatus = 0 }) {
   const log = join(dir, 'gh.log')
   const bin = join(dir, 'gh')
   await writeFile(bin, `#!/usr/bin/env node
@@ -47,17 +47,17 @@ appendFileSync(process.env.GH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n'
 const sub = process.argv[3]
 if (process.argv.includes('--clobber') || process.argv.includes('--latest') || sub === 'edit') process.exit(99)
 if (process.argv[2] === 'release' && sub === 'list') {
-  process.stdout.write(process.env.GH_LIST_JSON)
-  process.exit(0)
+  process.stdout.write(process.env.GH_LIST_JSON ?? '')
+  process.exit(Number(process.env.GH_LIST_STATUS || 0))
 }
 if (process.argv[2] === 'release' && sub === 'view') {
-  process.stdout.write(process.env.GH_VIEW_JSON)
-  process.exit(0)
+  process.stdout.write(process.env.GH_VIEW_JSON ?? '')
+  process.exit(Number(process.env.GH_VIEW_STATUS || 0))
 }
 process.exit(0)
 `)
   await chmod(bin, 0o755)
-  return { log, bin: bin.slice(0, bin.lastIndexOf('/')), listJson, viewJson }
+  return { log, bin: bin.slice(0, bin.lastIndexOf('/')), listJson, viewJson, listStatus, viewStatus }
 }
 
 function runRelease(fake, files = names) {
@@ -70,6 +70,8 @@ function runRelease(fake, files = names) {
       GH_LOG: join(fake.bin, 'gh.log'),
       GH_LIST_JSON: fake.listJson,
       GH_VIEW_JSON: fake.viewJson,
+      GH_LIST_STATUS: String(fake.listStatus ?? 0),
+      GH_VIEW_STATUS: String(fake.viewStatus ?? 0),
     },
   })
 }
@@ -163,6 +165,49 @@ test('the list asks for 1000 entries, and a full page without the tag does not c
   assert.equal(held.status, 1)
   assert.match(held.stderr, /already published and was left unchanged/)
   assert.deepEqual(await commands(published), [listArgs])
+
+  const over = await mkdtemp(join(tmpdir(), 'pwa-release-'))
+  const overflow = await fakeGh(over, { listJson: listed(1001) })
+  const overflowed = runRelease(overflow)
+  assert.equal(overflowed.status, 1)
+  assert.match(overflowed.stderr, /release list returned 1000 entries and did not include v0\.4\.2; not creating a release/)
+  assert.equal((await commands(overflow)).filter(args => args[1] === 'upload' || args[1] === 'create').length, 0)
+})
+
+test('a published plan does not create or upload', async () => {
+  assert.deepEqual(releaseAssetPlan({ isDraft: false, existingNames: [], uploadNames: names }), { action: 'fail', reason: 'published' })
+  const dir = await mkdtemp(join(tmpdir(), 'pwa-release-'))
+  const published = await fakeGh(dir, { listJson: '[{"tagName":"v0.4.2","isDraft":false}]' })
+  const result = runRelease(published)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /already published and was left unchanged/)
+  const ran = await commands(published)
+  assert.deepEqual(ran, [listArgs])
+  assert.equal(ran.filter(args => args[1] === 'upload' || args[1] === 'create').length, 0)
+})
+
+test('a failing release list or asset view does not create or upload', async () => {
+  const listDir = await mkdtemp(join(tmpdir(), 'pwa-release-'))
+  const listFailed = await fakeGh(listDir, { listJson: '[]', listStatus: 2 })
+  const listResult = runRelease(listFailed)
+  assert.equal(listResult.status, 1)
+  assert.equal((await commands(listFailed)).filter(args => args[1] === 'upload' || args[1] === 'create').length, 0)
+
+  const viewDir = await mkdtemp(join(tmpdir(), 'pwa-release-'))
+  const viewFailed = await fakeGh(viewDir, { listJson: '[{"tagName":"v0.4.2","isDraft":true}]', viewStatus: 3 })
+  const viewResult = runRelease(viewFailed)
+  assert.equal(viewResult.status, 1)
+  const viewCommands = await commands(viewFailed)
+  assert.deepEqual(viewCommands.map(args => args[1]), ['list', 'view'])
+  assert.equal(viewCommands.filter(args => args[1] === 'upload' || args[1] === 'create').length, 0)
+
+  for (const viewJson of ['{', '{}']) {
+    const dir = await mkdtemp(join(tmpdir(), 'pwa-release-'))
+    const fake = await fakeGh(dir, { listJson: '[{"tagName":"v0.4.2","isDraft":true}]', viewJson })
+    const result = runRelease(fake)
+    assert.notEqual(result.status, 0)
+    assert.equal((await commands(fake)).filter(args => args[1] === 'upload' || args[1] === 'create').length, 0)
+  }
 })
 
 test('a release list that is empty, not JSON, or not an array does not create or upload', async () => {

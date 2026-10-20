@@ -32,7 +32,10 @@ function main() {
     process.exit(1)
   }
   const list = gh(['release', 'list', '--limit', '1000', '--json', 'tagName,isDraft'])
-  if (list.status !== 0) fail(list)
+  if (list.status !== 0) {
+    process.stderr.write(list.stderr || '')
+    process.exit(1)
+  }
   const listed = list.stdout ?? ''
   if (listed.trim() === '') {
     console.error('release list was empty')
@@ -50,26 +53,27 @@ function main() {
     process.exit(1)
   }
   const match = releases.find(item => item.tagName === tag)
-  if (!match && releases.length === 1000) {
+  if (!match && releases.length >= 1000) {
     console.error(`release list returned 1000 entries and did not include ${tag}; not creating a release`)
     process.exit(1)
   }
   const uploadNames = files.map(file => basename(file))
-  if (match && match.isDraft !== true) {
-    console.error(`release ${tag} is already published and was left unchanged`)
-    process.exit(1)
-  }
   let existingNames = []
-  if (match) {
+  if (match && match.isDraft === true) {
     const view = gh(['release', 'view', tag, '--json', 'assets'])
-    if (view.status !== 0) fail(view)
+    if (view.status !== 0) {
+      process.stderr.write(view.stderr || '')
+      process.exit(1)
+    }
     existingNames = JSON.parse(view.stdout).assets.map(asset => asset.name)
   }
-  const plan = releaseAssetPlan({ isDraft: match ? match.isDraft : undefined, existingNames, uploadNames })
-  if (plan.action === 'fail' && plan.reason === 'asset') {
-    console.error(`release asset already exists and was left unchanged: ${plan.clash.join(', ')}`)
+  const plan = releaseAssetPlan({ isDraft: match ? match.isDraft ?? false : undefined, existingNames, uploadNames })
+  if (plan.action === 'fail') {
+    if (plan.reason === 'asset') console.error(`release asset already exists and was left unchanged: ${plan.clash.join(', ')}`)
+    if (plan.reason === 'published') console.error(`release ${tag} is already published and was left unchanged`)
     process.exit(1)
   }
+  if (plan.action !== 'create' && plan.action !== 'upload') process.exit(1)
   const version = tag.slice(1)
   const command = plan.action === 'create'
     ? ['release', 'create', tag, '--draft', '--verify-tag', '--title', `${tag} — PWA & Mobile`, '--notes-file', `docs/release-${version}.md`, ...files]
