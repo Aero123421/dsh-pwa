@@ -458,6 +458,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const originalInert = new Map([center, sidebar].filter(Boolean).map(el => [el, el.inert]))
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
       let previous = null, timer
+      let drawerOpener = null
       const sync = () => {
         const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
         mobile.chrome.set({ open: next })
@@ -466,7 +467,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         // Return focus only when it was inside the surface that is closing.
         if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
         if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) mobile.focusMenu()
-        if (next !== 'left') { closing = false; clearTimeout(closingTimer) }
+        if (next !== 'left') { closing = false; clearTimeout(closingTimer); drawerOpener = null }
         if (previous === 'left' && next === 'right') close()
         previous = next
       }
@@ -492,12 +493,20 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       let fromDrawer = false
       let dialogFromDrawer = false
       let drawerFocusAt = 0
+      const rememberOpener = target => {
+        const sidebar = document.querySelector('[data-slot=sidebar]')
+        if (!sidebar?.contains(target)) return
+        const control = target.closest?.('button, a, input, textarea, select, [tabindex]')
+        if (control instanceof HTMLElement) drawerOpener = control
+      }
       const noteDrawerGesture = event => {
         fromDrawer = !!event.target?.closest?.('[data-slot=sidebar], [role=menu]')
+        rememberOpener(event.target)
       }
       const noteDrawerFocus = event => {
         const sidebar = document.querySelector('[data-slot=sidebar]')
         if (sidebar?.contains(event.target)) drawerFocusAt = Date.now()
+        rememberOpener(event.target)
       }
       const focusInSidebar = () => {
         const sidebar = document.querySelector('[data-slot=sidebar]')
@@ -546,7 +555,13 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const onBody = records => {
         for (const record of records) {
           for (const node of record.addedNodes) onDialog(node)
-          for (const node of record.removedNodes) if (openedDialog(node)) dialogFromDrawer = false
+          for (const node of record.removedNodes) {
+            if (!openedDialog(node)) continue
+            const restore = dialogFromDrawer
+            dialogFromDrawer = false
+            // DSH restores the menu item that opened rename or confirm, and that item is already gone.
+            if (restore && drawerOpener instanceof HTMLElement && drawerOpener.isConnected) drawerOpener.focus({ preventScroll: true })
+          }
         }
       }
       const bodyWatch = new MutationObserver(onBody)

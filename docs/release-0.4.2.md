@@ -22,7 +22,8 @@ Japanese for DSH needs [dsh-japanese](https://github.com/Aero123421/dsh-japanese
 
 ## Known issues
 
-- On DSH 0.2.1-rc.2 at 844×390, the control that moves down to the latest message overlaps the table. That control belongs to DSH.
+- On DSH 0.2.1-rc.2, the control that moves down to the latest message overlaps Column D of a wide table. That control belongs to DSH. This plugin's mobile layout shows it at a width of 844px as well. This release does not change that control.
+- `/open-in-app/icon/filemanager` responds with 404. That route belongs to DSH.
 - iOS and Safari are unverified.
 - In dark mode the launch screen can stay white, and the PWA icons have no ETag.
 - npm may fail to install DSH `0.2.1-rc.2` because of DSH's own dependencies.
@@ -51,7 +52,8 @@ DSH を日本語にするには [dsh-japanese](https://github.com/Aero123421/dsh
 
 ## 既知の問題
 
-- DSH 0.2.1-rc.2 の 844×390 では、最新のメッセージへ下へ移動するボタンが表に重なります。このボタンは DSH 本体のものです。
+- DSH 0.2.1-rc.2 では、「下へ移動」ボタンが広い表の Column D に重なります。これは DSH 本体の挙動です。このプラグインのモバイル表示では、幅 844px でも出ます。今回はこのボタンは直しません。
+- `/open-in-app/icon/filemanager` は 404 になります。これは DSH 本体の問題です。
 - iOS と Safari は未確認です。
 - ダークモードでも起動画面が白くなることがあり、PWA アイコンに ETag がありません。
 - npm で `0.2.1-rc.2` が入らない場合があります（DSH 本体の依存の問題）。
