@@ -86,7 +86,7 @@ function updateRequestId(value) {
 /** Split a release body into UI languages. An unmarked body is the legacy Japanese note. */
 export function releaseNotes(body) {
   const text = String(body ?? '').slice(0, 6000)
-  const marks = [...text.matchAll(/<!--\s*notes:(en|ja)\s*-->/gi)]
+  const marks = [...text.matchAll(/<!--\s*notes:(en|ja|zh)\s*-->/gi)]
   if (!marks.length) {
     const trimmed = text.trim()
     return trimmed ? { ja: trimmed } : {}

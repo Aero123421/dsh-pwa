@@ -585,6 +585,7 @@ test('manager cancellation and override retain their terminal outcome despite pa
 
 test('release notes keep en and ja sections; an unmarked body stays Japanese', () => {
   assert.deepEqual(releaseNotes('<!-- notes:en -->\nHello\n<!-- notes:ja -->\n日本語'), { en: 'Hello', ja: '日本語' })
+  assert.deepEqual(releaseNotes('<!-- notes:zh -->\n中文\n<!-- notes:en -->\nHello'), { zh: '中文', en: 'Hello' })
   assert.deepEqual(releaseNotes('日本語だけ'), { ja: '日本語だけ' })
   assert.deepEqual(releaseNotes('  '), {})
 })

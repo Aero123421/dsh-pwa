@@ -120,23 +120,25 @@ try {
       const panel = page.locator('.dsh-pwa-updates')
       await panel.getByText(`プラグインの実行版: ${manifest.version}`, { exact: true }).waitFor()
       assert.equal(/\benable\b/.test(await panel.innerText()), false, 'the update page does not show a stage name')
+      const zhCopy = await page.evaluate(() => window.__pwaTestExports.copy?.zh?.updates ?? '')
       const noteLocales = [
-        ['en', 'English notes', 'Keep', 'https://example.com/dsh-pwa'],
-        ['ja', '日本語ノート', '残す', null],
-        ['zh', 'English notes', 'Keep', 'https://example.com/dsh-pwa'],
+        ['en', 'English notes', 'Keep', 'https://example.com/dsh-pwa', 'Plugin updates'],
+        ['ja', '日本語ノート', '残す', null, 'プラグインの更新'],
+        ['zh', zhCopy ? '中文笔记' : 'English notes', zhCopy ? '保留' : 'Keep', zhCopy ? null : 'https://example.com/dsh-pwa', zhCopy || 'Plugin updates'],
       ]
-      for (const [localeId, heading, strong, link] of noteLocales) {
+      for (const [localeId, heading, strong, link, updatesHeading] of noteLocales) {
         await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
-        await panel.getByRole('heading', { name: localeId === 'ja' ? 'プラグインの更新' : 'Plugin updates', exact: true }).waitFor()
-        if (localeId !== 'ja') {
-          await page.waitForFunction(() => {
-            const text = document.querySelector('.dsh-pwa-updates')?.innerText ?? ''
-            return text.includes('Plugin updates') && !text.includes('プラグインの更新') && !text.includes('dsh.pwa')
-          })
-          const localized = await panel.innerText()
-          assert.equal(localized.includes('dsh.pwa'), false, `${localeId} must not show message keys`)
-          assert.equal(localized.includes('プラグインの更新'), false, `${localeId} uses the English copy`)
+        if (localeId === 'zh') {
+          assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN', 'the built-in zh language sets the document language to zh-CN')
         }
+        const localized = await page.waitForFunction(expected => {
+          const text = document.querySelector('.dsh-pwa-updates')?.innerText ?? ''
+          const japaneseHeading = text.includes('プラグインの更新')
+          const ready = text.includes(expected) && !text.includes('dsh.pwa') && (expected === 'プラグインの更新' || !japaneseHeading)
+          return ready ? text : false
+        }, updatesHeading).then(handle => handle.jsonValue())
+        assert.equal(localized.includes('dsh.pwa'), false, `${localeId} must not show message keys`)
+        if (!zhCopy && localeId !== 'ja') assert.equal(localized.includes('プラグインの更新'), false, `${localeId} showed:\n${localized.slice(0, 400)}`)
         const rendered = await page.evaluate(localeId => {
           const logs = []
           const report = console.error
@@ -148,7 +150,7 @@ try {
             const { ReleaseNotes, notesForLocale } = window.__pwaTestExports
             document.querySelector('.dsh-pwa-notes-probe')?.__pwaNotesRoot?.unmount()
             document.querySelector('.dsh-pwa-notes-probe')?.remove()
-            const notes = { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**' }
+            const notes = { en: '## English notes\n\n- **Keep** the [release](https://example.com/dsh-pwa)', ja: '## 日本語ノート\n\n- **残す**', ...(window.__pwaTestExports.copy?.zh ? { zh: '## 中文笔记\n\n- **保留**' } : {}) }
             const markdown = notesForLocale(notes, localeId)
             const host = document.createElement('div')
             host.className = 'dsh-pwa-notes-probe'

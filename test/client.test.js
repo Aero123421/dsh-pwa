@@ -201,7 +201,10 @@ test('release notes follow the UI language and are not left as one raw markdown 
   const { notesForLocale, releaseNoteBlocks, inlineParts } = await clientExports()
   const notes = { en: '# Hello\n\n- See [notes](https://example.com/n)\n\n`code`', ja: '# 日本語\n\n- 項目' }
   assert.equal(notesForLocale(notes, 'en'), notes.en)
+  assert.equal(notesForLocale(notes, 'zh'), notes.en)
   assert.equal(notesForLocale(notes, 'zh-CN'), notes.en)
+  assert.equal(notesForLocale({ ...notes, zh: '# 中文' }, 'zh'), '# 中文')
+  assert.equal(notesForLocale({ ...notes, zh: '# 中文' }, 'zh-CN'), '# 中文')
   assert.equal(notesForLocale(notes, 'ja-JP'), notes.ja)
   assert.equal(notesForLocale('日本語だけ', 'en'), '')
   assert.equal(notesForLocale('日本語だけ', 'ja'), '日本語だけ')

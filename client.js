@@ -661,12 +661,13 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     if (modal || route) return true
     return escape && !menu
   }
-  /** Legacy unmarked release text is Japanese. English and zh-CN use the en section only. */
+  /** Legacy unmarked release text is Japanese. A zh section is used for zh; otherwise the en section. */
   function notesForLocale(notes, locale) {
     const lang = String(locale ?? 'en').toLowerCase().split('-')[0]
     if (typeof notes === 'string') return lang === 'ja' ? notes : ''
     if (!notes || typeof notes !== 'object') return ''
     if (lang === 'ja' && notes.ja) return notes.ja
+    if (lang === 'zh' && notes.zh) return notes.zh
     return notes.en || ''
   }
   function releaseNoteBlocks(markdown) {
