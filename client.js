@@ -494,8 +494,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       let dialogFromDrawer = false
       let drawerFocusAt = 0
       const rememberOpener = target => {
-        const sidebar = document.querySelector('[data-slot=sidebar]')
-        if (!sidebar?.contains(target)) return
+        if (!target?.closest?.('[data-slot=sidebar]')) return
         const control = target.closest?.('button, a, input, textarea, select, [tabindex]')
         if (control instanceof HTMLElement) drawerOpener = control
       }
@@ -516,6 +515,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       }
       const onClick = event => {
         noteDrawerGesture(event)
+        rememberOpener(event.target)
         const target = event.target
         if (!target.closest?.('[data-slot=sidebar]')) return
         const newSession = target.closest('button')?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
@@ -531,6 +531,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         if (drawerDialogKeepsDrawer({ settings: settingsDialog(node), modal: true, fromDrawer, focusInSidebar: focusInSidebar() })) {
           dialogFromDrawer = true
           clearTimeout(timer)
+          armDialogWatch()
           return
         }
         dialogFromDrawer = false
@@ -552,17 +553,39 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       document.addEventListener('focusin', noteDrawerFocus, true)
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
-      const onBody = records => {
-        for (const record of records) {
-          for (const node of record.addedNodes) onDialog(node)
-          for (const node of record.removedNodes) {
-            if (!openedDialog(node)) continue
-            const restore = dialogFromDrawer
-            dialogFromDrawer = false
-            // DSH restores the menu item that opened rename or confirm, and that item is already gone.
-            if (restore && drawerOpener instanceof HTMLElement && drawerOpener.isConnected) drawerOpener.focus({ preventScroll: true })
-          }
+      const restoreDrawerFocus = () => {
+        const opener = drawerOpener
+        const back = () => {
+          if (document.querySelector('[role=dialog][aria-modal="true"]')) return
+          if (!(opener instanceof HTMLElement) || !opener.isConnected || opener.closest('[inert]')) return
+          // The row action is display:none until the row is hovered, and a collapsed copy of the row has no box. Focus the visible title.
+          const key = opener.closest('[data-row-key]')?.getAttribute('data-row-key')
+          const visibleRow = key ? [...document.querySelectorAll(`[data-row-key="${CSS.escape(key)}"]`)].find(el => el.getClientRects().length > 0) : null
+          const title = visibleRow?.querySelector('span')
+          const place = opener.getClientRects().length > 0 ? opener : title
+          if (!(place instanceof HTMLElement) || place.getClientRects().length === 0) return
+          if (!place.hasAttribute('tabindex') && place !== opener) place.setAttribute('tabindex', '-1')
+          place.focus({ preventScroll: true })
         }
+        // The menu item DSH would restore is already gone, and the sidebar can still be inert in the same turn.
+        back()
+        requestAnimationFrame(back)
+        setTimeout(back, 0)
+      }
+      let dialogWatch
+      const armDialogWatch = () => {
+        dialogWatch?.disconnect()
+        dialogWatch = new MutationObserver(() => {
+          if (document.querySelector('[role=dialog][aria-modal="true"]')) return
+          dialogWatch?.disconnect()
+          if (!dialogFromDrawer) return
+          dialogFromDrawer = false
+          restoreDrawerFocus()
+        })
+        dialogWatch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['role', 'aria-modal'] })
+      }
+      const onBody = records => {
+        for (const record of records) for (const node of record.addedNodes) onDialog(node)
       }
       const bodyWatch = new MutationObserver(onBody)
       bodyWatch.observe(document.body, { childList: true })
@@ -588,7 +611,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) && !drawerDialogKeepsDrawer({ settings: settingsDialog(document.body), modal: true, focusInSidebar: focusInSidebar() }) })) close()
       sync()
       return () => {
-        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); routeWatch.disconnect()
+        clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); dialogWatch?.disconnect(); routeWatch.disconnect()
         document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
         if (pushState && history.pushState !== pushState) history.pushState = pushState

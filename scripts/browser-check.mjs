@@ -129,6 +129,10 @@ try {
         await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
         await panel.getByRole('heading', { name: localeId === 'ja' ? 'プラグインの更新' : 'Plugin updates', exact: true }).waitFor()
         if (localeId !== 'ja') {
+          await page.waitForFunction(() => {
+            const text = document.querySelector('.dsh-pwa-updates')?.innerText ?? ''
+            return text.includes('Plugin updates') && !text.includes('プラグインの更新') && !text.includes('dsh.pwa')
+          })
           const localized = await panel.innerText()
           assert.equal(localized.includes('dsh.pwa'), false, `${localeId} must not show message keys`)
           assert.equal(localized.includes('プラグインの更新'), false, `${localeId} uses the English copy`)
