@@ -52,10 +52,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dsh-pwa-*.tgz SHA256SUMS
-          else
-            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG — PWA & Mobile" \
-              --notes-file "docs/release-${RELEASE_TAG#v}.md" dsh-pwa-*.tgz SHA256SUMS
-          fi
+        run: node scripts/release-assets.mjs dsh-pwa-*.tgz SHA256SUMS
