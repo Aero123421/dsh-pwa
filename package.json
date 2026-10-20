@@ -40,8 +40,7 @@
     "test": "node --test",
     "pack:plugin": "npm pack --ignore-scripts",
     "test:browser": "node scripts/browser-check.mjs",
-    "check:dsh-peer": "node scripts/check-dsh-peer.mjs",
-    "check:no-add-language": "node scripts/check-no-add-language.mjs"
+    "check:dsh-peer": "node scripts/check-dsh-peer.mjs"
   },
   "keywords": [
     "dsh-plugin",

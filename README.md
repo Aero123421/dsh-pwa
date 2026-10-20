@@ -127,7 +127,6 @@ Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The
 npm ci --ignore-scripts
 npm test
 npm run check:dsh-peer
-npm run check:no-add-language
 npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
 npx playwright install --with-deps chromium
 node scripts/pwa-proxy-check.mjs
@@ -136,8 +135,6 @@ npm run test:browser
 ```
 
 `npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
-
-`npm run check:no-add-language` packs this plugin and fails if any published file defines a language. The test directory is not part of that package.
 
 Node's built-in runner checks the mobile mode store, the landscape and keyboard viewport handling, the header-menu/top-bar switch, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
 

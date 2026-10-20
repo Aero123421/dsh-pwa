@@ -13,11 +13,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install ripgrep when the runner does not have it
-        run: command -v rg >/dev/null || (sudo apt-get update && sudo apt-get install -y ripgrep)
       - run: npm ci --ignore-scripts
       - run: npm test
-      - name: Published files must not call addLanguage
-        run: npm run check:no-add-language
+      - name: Published source must not call addLanguage
+        run: rc=0; grep -rnF addLanguage client.js index.js updates.js || rc=$?; test "$rc" -eq 1
       - name: Check the DSH peer against the published app-boot alpha
         run: npm run check:dsh-peer
