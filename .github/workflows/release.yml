@@ -47,11 +47,15 @@ jobs:
         run: |
           npm pack --ignore-scripts
           sha256sum dsh-pwa-*.tgz > SHA256SUMS
-      - name: Publish GitHub Release
+      - name: Create a draft Release or attach assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG — PWA & Mobile" \
-            --notes-file "docs/release-${RELEASE_TAG#v}.md" dsh-pwa-*.tgz SHA256SUMS
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dsh-pwa-*.tgz SHA256SUMS
+          else
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG — PWA & Mobile" \
+              --notes-file "docs/release-${RELEASE_TAG#v}.md" dsh-pwa-*.tgz SHA256SUMS
+          fi

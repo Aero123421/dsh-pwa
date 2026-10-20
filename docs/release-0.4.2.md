@@ -27,6 +27,7 @@ Japanese for DSH needs [dsh-japanese](https://github.com/Aero123421/dsh-japanese
 - iOS and Safari are unverified.
 - In dark mode the launch screen can stay white, and the PWA icons have no ETag.
 - npm may fail to install DSH `0.2.1-rc.2` because of DSH's own dependencies.
+- pnpm 12 でプラグインを追加・更新すると、プロファイルの lockfile に公開から24時間たっていない依存が含まれている場合、ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION で失敗することがあります。このとき pnpm がプロファイルの node_modules を空にし、DSH も元に戻さないため、同じプロファイルのすべてのプラグインが読み込まれなくなります。プラグインの追加・更新は pnpm 10 で行ってください。壊れたときは pnpm 10 で `dsh plugin --profile web install` を実行すると戻ります。pnpm 11 では ERR_PNPM_UNEXPECTED_STORE で止まりますが、node_modules は壊れません。
 
 <!-- notes:ja -->
 
@@ -57,3 +58,4 @@ DSH を日本語にするには [dsh-japanese](https://github.com/Aero123421/dsh
 - iOS と Safari は未確認です。
 - ダークモードでも起動画面が白くなることがあり、PWA アイコンに ETag がありません。
 - npm で `0.2.1-rc.2` が入らない場合があります（DSH 本体の依存の問題）。
+- pnpm 12 でプラグインを追加・更新すると、プロファイルの lockfile に公開から24時間たっていない依存が含まれている場合、ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION で失敗することがあります。このとき pnpm がプロファイルの node_modules を空にし、DSH も元に戻さないため、同じプロファイルのすべてのプラグインが読み込まれなくなります。プラグインの追加・更新は pnpm 10 で行ってください。壊れたときは pnpm 10 で `dsh plugin --profile web install` を実行すると戻ります。pnpm 11 では ERR_PNPM_UNEXPECTED_STORE で止まりますが、node_modules は壊れません。
