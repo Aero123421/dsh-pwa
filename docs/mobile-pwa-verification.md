@@ -34,13 +34,39 @@ iPhone相当（390×844、タッチ、画素密度3倍）と横向き（844×390
 
 幅1024px以上で「オン」にした場合（iPad横向きなど）、DSHはデスクトップ用のサイドバー幅の設定を使うため、最初の表示でドロワーが開いていることがあります。一度閉じるとDSHがその状態を保存するので、プラグインからは変更しません。
 
+## タッチ操作（0.4.3）
+
+タッチ修正は `(any-pointer: coarse)` を監視し、モバイル表示とは独立した `html[data-dsh-touch]` に適用します。iPad の標準レイアウトも対象です。「オフ」はモバイル表示だけを無効にし、タッチ修正は残ります。
+
+| 対象・原因 | 対策・制約 |
+|---|---|
+| ページのバウンス・pull-to-refresh・会話端の連鎖 | html/body の overscroll を none、会話の縦を contain にする。iOS 実機のラバーバンドは未確認 |
+| ダブルタップ拡大・会話幅ハンドルのスワイプ遮断 | 詳細度 0 の manipulation（ピンチと本体の明示指定は保持）。pointer:coarse の幅ハンドルを素通しするため指で幅調整できない |
+| タブレットの表が横へ動かない | upstream の `.md-table-wide` を T/M 共通にし、表の直親の横 overflow を有効化 |
+| 標準レイアウトの入力欄がキーボードに隠れる | upstream の measure を T/M 共通化。height と offsetTop に追従し、CSS 書込み前に innerHeight と幅を読む。ピンチ中は更新しない |
+| スマホのキーボード中の読書領域不足 | upstream の data-dsh-mobile-keyboard（innerHeight − height >120px）で dock を隠す。可視高 ≤260px、幅 ≥max(480px, 可視高×2) では compact にする |
+| 低い横向き・長文入力 | ヘッダーと唯一のメニューを保持、tabs/dock を隠し、入力を1行化。通常入力の上限は可視高−260px（最小36px、最大336px）。compact は44px |
+| 候補・model/permission picker が遮蔽される | スマホの filtered picker を fixed にし、compact の trigger/listbox も可視高内で内部スクロールする |
+| modal がキーボード下に配置される | presentation portal を可視高に制限し、root と同じ shift を適用。dialog は top:auto/margin-block:0、shortcuts は transform:none。隠れた modal 内の入力だけ nearest で表示する |
+| 狭い質問 footer・provider タブ | footer を折り返し、provider のタブを等幅の列にする |
+| hover 専用の sidebar 行操作 | T で表示、M で行とボタンを44px化し、pin/archive は既存 … メニューへ集約。検索ヘッダーの clip wrapper も拡張 |
+| 検索再選択・workspace 新規 draft の再利用で閉じない | 同じ画面の再選択は route/main が変わらないため、クリック判定に検索 treeitem と workspace 行末の New session を追加。操作ボタン/input は検索選択から除外し、double-click rename の待機処理は保持 |
+| 右パネル Escape・隠れた左ドロワー | modal/menu がなければ既存 panel toggle で右を閉じる。center の inert 解除後に upstream focusMenu へ戻す。右表示中は左を閉じ、collapsed 時は scrim を CSS でも隠す |
+| 小さい操作対象 | メッセージ・コード・process・tool、右パネル file/document/zoom、composer 主操作・slash、PWA 設定を44px化。設定 switch は ::after の hit area だけを拡張 |
+
+会話ヘッダー・fallback toolbar・設定UI・ダイアログ/route/main による閉鎖と restoreDrawerFocus は upstream のままです。右列に inert を設定せず、会話のスクロール位置も変更しません。キーボード追従は upstream の visualViewport 計測だけで行います。
+
+Node の実行型テストは、タッチ属性、タッチだけの追従、compact/keyboard、読取り順序、modal 入力（上端/下端・composer 除外）、解除、右 Escape と隠れたドロワーを検査します。CSS 文字列テストとは区別しています。`test:touch` は iPad 820×1180 と phone 390×844 の Chromium 生タッチで会話往復・端・ヘッダーからのスワイプとページ scroll=0 を確認します。
+
+実 iOS/Android の OS キーボード、IME/予測変換、viewport pan、0 でない safe-area、慣性/ラバーバンド、VoiceOver/TalkBack、ホーム画面追加は未検証です。DSH 本体の terminal 生タッチ scroll、hover 専用フォント操作、補助ボタンすべての44px化は対象外です。
+
 ## 内部DOMへの依存
 
-公開slotとserviceでできない表示変更だけ、`data-slot=root/sidebar/main`、`data-sidebar-collapsed`、`data-sidebar-right-panel/open`、`data-shortcut-modal=settings`、`data-slot="conversation.header"` の直下の `header`、`data-conversation-tabs`、`data-conversation-header-leading`、`data-composer-seat`、`.md-table-wide` とその直接のラッパーを利用します。hashed class名やReact fiberには依存しません。公式にモバイルpresentation APIができたら、このCSS seamをそちらに置き換えるのが望ましいです。
+公開slotとserviceでできない表示変更だけ、`data-slot=root/sidebar/main`、`data-sidebar-collapsed`、`data-sidebar-right-panel/open`、`data-shortcut-modal=settings`、`data-slot="conversation.header"` の直下の `header`、`data-conversation-tabs`、`data-conversation-header-leading`、`data-composer-seat`、`.md-table-wide` とその直接のラッパーを利用します。タッチ修正では data-conversation-scroll/composer-card/composer-dock/input-scroll/trigger-menu/row-key/question-key/files-*/textpreview-*/code-block-banner/clock/width-handle、modal の role/aria、tablist にも依存します（0.2.1-rc.2）。hashed class名やReact fiberには依存しません。公式にモバイルpresentation APIができたら、このCSS seamをそちらに置き換えるのが望ましいです。
 
 上部バー表示中の右パネルのcloseは既存toggleを押します。会話画面では右パネル自身のtoggleで閉じます。`layout.closeRightbar()`だけを呼ぶと、列の予約状態と右パネル本体のexpanded状態がずれるためです。
 
-モバイル変更は `html[data-dsh-mobile]` 内に限定します。解除時はobserver、イベント、購読、viewport変数、inertを片付けます。head補完は自分が変更した属性だけ復元し、その後他の所有者が変更した値は上書きしません。
+モバイル変更は `html[data-dsh-mobile]`、タッチ変更は `html[data-dsh-touch]` に限定します。解除時は observer、focusin/viewport/media-query イベント、購読、viewport/shift 変数、touch/mobile/keyboard/compact 属性、inert を片付けます。head補完は自分が変更した属性だけ復元し、その後他の所有者が変更した値は上書きしません。
 
 ## 再現可能な検証
 
@@ -51,6 +77,7 @@ npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
 npx playwright install --with-deps chromium
 npm pack --ignore-scripts
 npm run test:browser
+npm run test:touch
 ```
 
 ブラウザ検証は使い捨てのDSH_HOMEと、スクリプト内のローカルスタブ（固定のMarkdown応答を1件返す）を使います。既存のユーザープロファイルや実モデルAPIを利用しません。スクリーンショットはテストの一時ディレクトリに出力し、GitHub Actionsでは画像のみをartifactに保存します。認証URLを含む起動ログはartifactに含めません。

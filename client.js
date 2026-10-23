@@ -236,12 +236,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     }
     dispose() { this.closed = true; this.generation++; clearTimeout(this.timer); this.listeners.clear() }
   }
-  /* Mobile layout: stored per browser, applied as one attribute on <html> that scopes every rule below. */
+  /* Mobile layout: stored per browser; mobile and touch attributes scope host UI rules independently. */
   const MODES = ['auto', 'on', 'off'], MODE_KEY = 'dsh-pwa:mobile-ui'
   // Phones in landscape are wider than 767px but too short for the desktop frame.
   const NARROW = '(max-width: 767px), (max-height: 500px) and (pointer: coarse)'
   // A visual viewport this much shorter than the window is treated as an open on-screen keyboard.
-  const KEYBOARD_MIN = 120
+  const TOUCH = '(any-pointer: coarse)', KEYBOARD_MIN = 120
   function createStore(state) {
     const listeners = new Set()
     return {
@@ -259,22 +259,29 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     constructor({ storage, matchMedia, root, viewport, view } = {}) {
       if (storage === undefined) { try { storage = globalThis.localStorage } catch {} }
       this.storage = storage; this.root = root ?? globalThis.document?.documentElement; this.listeners = new Set()
-      this.view = view ?? globalThis
+      this.view = view ?? globalThis; this.closed = false
+      this.document = this.view.document ?? globalThis.document
       this.viewport = viewport === undefined ? globalThis.visualViewport : viewport
       // open: the surface covering the conversation; inline: menu buttons mounted in conversation headers.
       this.chrome = createStore({ open: null, inline: 0 })
       this.menus = new Set()
       let mode
       try { mode = storage?.getItem(MODE_KEY) } catch {}
-      this.query = (matchMedia ?? globalThis.matchMedia)?.(NARROW)
+      const match = matchMedia ?? globalThis.matchMedia
+      this.query = match?.(NARROW); this.touchQuery = match?.(TOUCH); this.touch = false
       this.onViewport = () => this.measure()
       this.viewport?.addEventListener?.('resize', this.onViewport)
       this.viewport?.addEventListener?.('scroll', this.onViewport)
       this.onChange = () => this.update()
       this.query?.addEventListener?.('change', this.onChange)
+      this.touchQuery?.addEventListener?.('change', this.onChange)
+      this.onFocusIn = () => this.measure()
+      this.document?.addEventListener?.('focusin', this.onFocusIn, true)
+      this.document?.addEventListener?.('focusout', this.onFocusIn, true)
       this.state = { mode: MODES.includes(mode) ? mode : 'auto', active: false }
       this.update(this.state.mode)
     }
+    get tracking() { return !this.closed && (!!this.state?.active || this.touch) }
     getSnapshot = () => this.state
     subscribe = listener => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
     setMode(mode) {
@@ -285,6 +292,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     update(mode = this.state.mode) {
       const active = mode === 'on' || (mode === 'auto' && !!this.query?.matches)
       this.root?.toggleAttribute?.('data-dsh-mobile', active)
+      this.touch = !!this.touchQuery?.matches
+      this.root?.toggleAttribute?.('data-dsh-touch', this.touch)
       const changed = mode !== this.state.mode || active !== this.state.active
       if (changed) this.state = { mode, active }
       this.measure(); this.syncToolbar()
@@ -296,21 +305,43 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     measure() {
       const style = this.root?.style, viewport = this.viewport
       if (!style) return
-      if (!this.state?.active || !viewport) {
+      if (!this.tracking || !viewport) {
         style.removeProperty('--dsh-pwa-viewport'); style.removeProperty('--dsh-pwa-shift')
         this.root.removeAttribute?.('data-dsh-mobile-keyboard')
+        this.root.removeAttribute?.('data-dsh-pwa-compact'); this.keyboard = false
+        this.viewportBaseline = null
         return
       }
       // Pinch zoom also moves the visual viewport; keep the last unzoomed frame.
       if (Math.abs((viewport.scale ?? 1) - 1) > 0.01) return
       const height = Math.round(viewport.height), top = Math.max(0, Math.round(viewport.offsetTop ?? 0))
+      // Read window geometry before CSS writes: innerHeight can otherwise force layout.
+      const windowHeight = this.view?.innerHeight, width = Math.round(viewport.width ?? this.view?.innerWidth ?? 0)
+      const active = this.document?.activeElement
+      const editable = !!(active?.matches?.('input,textarea,[contenteditable]:not([contenteditable=false])') || active?.isContentEditable)
+      // resizes-content shrinks both viewports. Keep the largest visible height
+      // at this width, but require editable focus so an ordinary resize is not a keyboard.
+      const baseline = this.viewportBaseline
+      const reference = baseline?.width === width ? Math.max(baseline.height, height) : height
+      this.viewportBaseline = { width, height: reference }
+      const keyboard = (typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
+        || (editable && reference - height > KEYBOARD_MIN)
       style.setProperty('--dsh-pwa-viewport', `${height}px`)
       // iOS pans the visual viewport over the page when the keyboard opens. Move the
       // app with it, or the shortened app stays at the top and the visible area is blank.
       if (top) style.setProperty('--dsh-pwa-shift', `translateY(${top}px)`)
       else style.removeProperty('--dsh-pwa-shift')
-      const windowHeight = this.view?.innerHeight
-      this.root.toggleAttribute?.('data-dsh-mobile-keyboard', typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
+      this.keyboard = keyboard
+      this.root.toggleAttribute?.('data-dsh-mobile-keyboard', keyboard)
+      this.root.toggleAttribute?.('data-dsh-pwa-compact', height <= 260 && width >= Math.max(480, height * 2))
+      if (keyboard) this.revealModalInput(this.document?.activeElement)
+    }
+    /** Reveal modal fields only; the conversation owns composer scrolling. */
+    revealModalInput(target) {
+      if (!(target?.matches?.('input,textarea,[contenteditable]') || target?.isContentEditable) || target.closest?.('[data-composer-seat]') || !target.closest?.('[role=dialog][aria-modal=true]')) return
+      const rect = target.getBoundingClientRect?.(), top = Math.round(this.viewport?.offsetTop ?? 0)
+      const bottom = top + Math.round(this.viewport?.height ?? 0)
+      if (rect && (rect.bottom > bottom || rect.top < top)) target.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     }
     syncToolbar() { this.root?.toggleAttribute?.('data-dsh-mobile-toolbar', this.state.active && this.chrome.get().inline === 0) }
     /** Register a menu button; a conversation-header button replaces the fallback toolbar while mounted. */
@@ -330,31 +361,76 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       entry?.element.focus({ preventScroll: true })
     }
     dispose() {
+      this.closed = true
+      this.document?.removeEventListener?.('focusin', this.onFocusIn, true)
+      this.document?.removeEventListener?.('focusout', this.onFocusIn, true)
+      this.viewportBaseline = null
+      this.touchQuery?.removeEventListener?.('change', this.onChange)
       this.viewport?.removeEventListener?.('resize', this.onViewport)
       this.viewport?.removeEventListener?.('scroll', this.onViewport)
       this.query?.removeEventListener?.('change', this.onChange)
       this.root?.style?.removeProperty('--dsh-pwa-viewport'); this.root?.style?.removeProperty('--dsh-pwa-shift')
-      for (const name of ['data-dsh-mobile', 'data-dsh-mobile-toolbar', 'data-dsh-mobile-keyboard']) this.root?.removeAttribute?.(name)
+      for (const name of ['data-dsh-mobile', 'data-dsh-touch', 'data-dsh-pwa-compact', 'data-dsh-mobile-toolbar', 'data-dsh-mobile-keyboard']) this.root?.removeAttribute?.(name)
       this.listeners.clear(); this.chrome.clear(); this.menus.clear()
     }
   }
   // Internal DOM seam: official ui-layout and ui-conversation, checked on 0.2.1-alpha.3 and 0.2.1-rc.2.
   // There is no public mobile-presentation API. Keep state in ctx.layout and
   // style only stable slot/data markers; never copy or replace the DSH shell.
-  const FRAME = '[data-slot=root] > div', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]'
+  const FRAME = '[data-slot=root] > div', CENTER = ':scope > div:has(> [data-slot=main])', M = 'html[data-dsh-mobile]', T = 'html[data-dsh-touch]'
   const HEADER = '[data-slot="conversation.header"] > header', SETTINGS = '[data-shortcut-modal=settings]'
   const SAFE_L = 'env(safe-area-inset-left,0px)', SAFE_R = 'env(safe-area-inset-right,0px)', SAFE_B = 'env(safe-area-inset-bottom,0px)'
   const mobileCss = `
+    ${T},${T} body,${M},${M} body{overscroll-behavior:none}
+    ${T} [data-conversation-scroll]{overscroll-behavior-y:contain}
+    /* Workspace/session actions otherwise require hover. A touch row tap opens
+       the session (and dismisses the mobile drawer), so it cannot reveal them. */
+    ${T} [data-slot=sidebar] [data-row-key]>span:has(button){display:flex!important}
+    /* Enlarge the file/document seats on touch, not every panel button: tab
+       chrome has a separate constrained layout that cannot safely grow here. */
+    ${T} [data-files-entry]>button{min-height:44px}
+    ${T} [data-files-state=tree]>div:has(>[data-files-reload]),${T} [data-textpreview-state=text]>div:has([data-document-viewer-menu]){height:48px}
+    ${T} [data-files-reload],${T} [data-document-viewer-menu],${T} [data-textpreview-tool]{min-width:44px;min-height:44px}
+    ${T} [data-document-zoom-controls] button{min-width:44px;min-height:44px}
+    ${T} [data-files-body],${T} [data-textpreview-body]{overscroll-behavior:contain}
+    /* Keep the switch track unchanged; only its transparent hit region grows.
+       Settings rows already separate these controls vertically. Do not apply
+       this to dense toolbar icons, whose expanded regions could overlap. */
+    ${T} [data-shortcut-modal=settings] button[role=switch]{position:relative;overflow:visible}
+    ${T} [data-shortcut-modal=settings] button[role=switch]::after{content:"";position:absolute;left:min(0px,calc((100% - 44px)/2));top:min(0px,calc((100% - 44px)/2));width:100%;height:100%;min-width:44px;min-height:44px;pointer-events:auto}
+    /* These sibling overlays forward wheel, not touch, to the conversation.
+       Pass coarse-primary input through instead of starting an accidental resize.
+       A mouse-primary hybrid keeps its width controls. */
+    @media(pointer:coarse){${T} [data-width-handle]{pointer-events:none}}
+    /* Message and code chrome uses 24/28px desktop buttons. Enlarge only these
+       stable seats on touch; wrapping preserves the clock on narrow phones. */
+    ${T} [data-conversation-scroll] [data-clock]{height:auto;min-height:44px;flex-wrap:wrap}
+    ${T} [data-conversation-scroll] [data-clock] button,${T} [data-code-block-banner] button{min-width:44px;min-height:44px;flex-shrink:0}
+    ${T} [data-code-block-banner]{min-height:44px}
+    ${T} button[data-turn-process],${T} button[data-process-activity],${T} [data-slot="tool.call.toolview"] [role=button][data-expandable=true]{min-height:44px}
+    :where(${T}) *{touch-action:manipulation}
     ${M}{--dsh-pwa-drawer:min(86vw,320px);--dsh-pwa-top:env(safe-area-inset-top,0px);--dsh-pwa-cover:0px;-webkit-tap-highlight-color:transparent}
     ${M}[data-dsh-mobile-toolbar]{--dsh-pwa-top:calc(52px + env(safe-area-inset-top,0px));--dsh-pwa-cover:var(--dsh-pwa-top)}
-    ${M} body{overscroll-behavior:none}
-    ${M} #root{height:var(--dsh-pwa-viewport,100dvh)!important;min-height:0;transform:var(--dsh-pwa-shift,none)}
+    :is(${M},${T}) #root{height:var(--dsh-pwa-viewport,100dvh)!important;min-height:0;transform:var(--dsh-pwa-shift,none)}
     ${M} ${FRAME}{grid-template-columns:0 minmax(0,1fr) 0!important;box-sizing:border-box;padding-top:var(--dsh-pwa-top);transition:none!important}
     ${M} ${FRAME}>div:has(>[data-slot=main]){grid-column:2;grid-row:1;min-width:0;min-height:0;transform:none!important;border-radius:0;box-sizing:border-box;padding-inline:${SAFE_L} ${SAFE_R}}
     ${M} ${FRAME}>div:has(>[data-slot=sidebar]){position:fixed;top:var(--dsh-pwa-cover);left:0;width:calc(var(--dsh-pwa-drawer) + ${SAFE_L});height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-cover));z-index:30;box-sizing:border-box;padding:calc(var(--dsh-pwa-top) - var(--dsh-pwa-cover)) 0 ${SAFE_B} ${SAFE_L};background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-base));transform:translateX(-100%);visibility:hidden;transition:transform .2s ease,visibility 0s linear .2s}
     ${M} ${FRAME}:not([data-sidebar-collapsed])>div:has(>[data-slot=sidebar]){transform:none;visibility:visible;transition-delay:0s;box-shadow:8px 0 24px #0002}
     ${M} [data-slot=sidebar]>div{width:100%!important}
-    ${M} [data-slot=sidebar] nav button{min-height:44px}
+    ${M} [data-slot=sidebar] button{min-width:44px;min-height:44px}
+    /* The host tree hides all row actions behind :hover. A phone has no hover:
+       expose its menu, while duplicate quick actions stay available in that menu. */
+    ${M} [data-slot=sidebar] [data-row-key^="workspace:"],${M} [data-slot=sidebar] [data-row-key^="session:"]{height:44px;min-height:44px}
+    ${M} [data-slot=sidebar] [data-row-key]>span:has(button){height:auto!important;gap:0!important}
+    ${M} [data-slot=sidebar] [data-row-key^="session:"]>span:has(button)>[data-slot]{display:none!important}
+    /* Resize the header's clipping wrappers with its buttons, not only their
+       hit targets. The host collapses these wrappers when search is expanded. */
+    ${M} [data-slot="sidebar.workspaces"]>div>div:has(input){min-height:52px}
+    ${M} [data-slot="sidebar.workspaces"]>div>div:has(input)>div:has(button[aria-expanded="false"]){min-width:44px;max-width:44px}
+    ${M} [data-slot="sidebar.workspaces"]>div>div:has(input)>div:has(button[aria-expanded="true"]){min-width:0;max-width:100%}
+    ${M} [data-slot="sidebar.workspaces"]>div>div:has(input):has(button[aria-expanded="false"])>div:has(button):not(:has(input)){max-width:92px}
+    ${M} [data-slot=sidebar] div:has(>button[aria-expanded]):has(>input){height:44px}
+    ${M} [role=menu] [role=menuitem]{min-height:44px;box-sizing:border-box}
     ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
     ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding:0 ${SAFE_R} ${SAFE_B} ${SAFE_L}}
     ${M} ${FRAME}>div[data-side]{display:none!important}
@@ -369,20 +445,70 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
     ${M}[data-dsh-mobile-keyboard] [data-composer-seat]{padding-bottom:0}
     ${M} [data-composer-input],${M} input,${M} textarea,${M} select{font-size:max(16px,1em)}
-    ${M} .md-table-wide{overflow-x:auto!important;padding-bottom:0!important;overscroll-behavior-x:contain}
+    /* Composer controls keep a finger-sized target on touch screens, including
+       tablets using the stock layout. Inline editor chips keep their own size. */
+    ${T} [data-composer-card] button:not([contenteditable] button):not([data-slot="conversation.input.attachments"] button),${T} [data-composer-seat] button[aria-haspopup=dialog]{min-width:44px;min-height:44px}
+    ${T} [id^=dsh-slash-option-]{min-height:44px}
+    ${M}[data-dsh-mobile-keyboard] [data-composer-dock]{display:none}
+    /* The stock 336px editor cap can exceed the whole keyboard-reduced phone
+       viewport. Reserve the header, action row and statistics before growing. */
+    ${T} [data-input-scroll]{max-height:min(336px,max(36px,calc(var(--dsh-pwa-viewport,100dvh) - 260px)))}
+    /* /model and /permission use an inline filtered picker, not the portalled
+       toolbar menus. On phones it needs a visible-viewport surface of its own. */
+    ${M} [data-composer-seat]:has([data-composer-overlay] [data-menu-material]>input){z-index:25}
+    ${M} [data-composer-overlay] [data-menu-material]:has(>input){position:fixed!important;left:12px;right:12px;top:calc(var(--dsh-pwa-top,0px) + 80px);bottom:auto;width:auto;max-width:calc(100vw - 24px);max-height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-top,0px) - 96px)!important}
+
+    /* Stock tablet tables hide native x overflow; keep vertical scroll chaining. */
+    :is(${M},${T}) .md-table-wide{overflow-x:auto!important;padding-bottom:0!important;overscroll-behavior-x:contain}
+    ${T} [data-conversation-scroll] div:has(>table){overflow-x:auto}
     ${M} [data-slot=main] table :is(th,td){max-width:min(60vw,320px)}
+    /* The question footer's pager and actions cannot share one row on small
+       phones. Wrap the groups instead of clipping Submit at the card edge. */
+    ${M} [data-question-key]>section>footer{flex-wrap:wrap;gap:8px}
+    ${M} [data-question-key]>section>footer>div:last-child{margin-left:auto}
     ${M} ${SETTINGS}{position:relative;flex-direction:column!important;width:calc(100vw - 16px - ${SAFE_L} - ${SAFE_R});max-width:none;height:calc(var(--dsh-pwa-viewport,100dvh) - 16px - env(safe-area-inset-top,0px) - ${SAFE_B});max-height:900px;min-width:0;border-radius:16px}
     ${M} ${SETTINGS}>nav{width:auto!important;min-width:0;flex:none!important;max-width:100%;padding:8px 12px 0;gap:4px;border:0}
     ${M} ${SETTINGS}>nav>div:first-child{display:flex;align-items:center;min-height:44px;max-width:calc(100% - 200px);padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
     ${M} ${SETTINGS}>nav>div:last-child{display:flex;flex-direction:row;gap:4px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none}
-    ${M} ${SETTINGS}>nav>div:last-child>*{flex:none;width:auto;min-height:40px}
+    ${M} ${SETTINGS}>nav>div:last-child>*{flex:none;width:auto;min-height:44px}
     ${M} ${SETTINGS}>div:last-child{flex:1 1 auto;min-height:0;min-width:0;width:auto}
     ${M} ${SETTINGS}>div:last-child>div:first-child{position:absolute;top:8px;right:8px;height:auto;max-width:calc(100% - 96px);padding:0;gap:4px;z-index:1}
     ${M} ${SETTINGS}>div:last-child>div:first-child>*{min-width:0}
     ${M} ${SETTINGS}>div:last-child>div:first-child button{white-space:nowrap}
     ${M} ${SETTINGS}>div:last-child>div:first-child button{min-width:44px;min-height:44px}
     ${M} ${SETTINGS}>div:last-child>div:last-child{padding:8px 16px calc(16px + ${SAFE_B});min-width:0;overflow:auto}
-    ${M} .dsh-pwa-actions button,${M} .dsh-pwa-segment button{min-height:40px}
+    /* Portalled modal roots otherwise center against the layout viewport, below
+       the iOS keyboard. Bound the surface (not just its content) to the visible
+       viewport; short screens may scroll the entire dialog to reach actions. */
+    ${T} body>[role=presentation]:has(>[role=dialog][aria-modal=true]){top:0;bottom:auto;transform:var(--dsh-pwa-shift,none);height:var(--dsh-pwa-viewport,100dvh);max-height:var(--dsh-pwa-viewport,100dvh);padding:12px;box-sizing:border-box}
+    ${T} body>[role=presentation]>[role=dialog][aria-modal=true]{top:auto;margin-block:0;max-height:calc(var(--dsh-pwa-viewport,100dvh) - 24px);max-width:calc(100vw - 24px);overflow-y:auto}
+    ${T} [data-shortcut-modal=shortcuts]{transform:none}
+    /* Keep segmented options side by side so their shared selection indicator
+       remains correct, but let labels wrap inside equal touch-sized columns. */
+    ${M} [data-shortcut-modal=settings] [role=tablist]{display:flex;width:100%;max-width:100%;box-sizing:border-box}
+    ${M} [data-shortcut-modal=settings] [role=tablist]>[role=tab]{flex:1 1 0;white-space:normal;min-width:0;min-height:44px;height:auto;overflow-wrap:anywhere}
+    :is(${M},${T}) :is(.dsh-pwa-actions button,.dsh-pwa-segment button){min-width:44px;min-height:44px}
+    /* Off keeps the desktop settings columns, even on a narrow touch screen.
+       Collapse segment tracks before their 44px buttons can overlap. */
+    ${T} .dsh-pwa-segment{min-width:0;grid-template-columns:repeat(auto-fit,minmax(44px,1fr))}
+    ${T} .dsh-pwa-link{display:flex;align-items:center;min-height:44px;max-width:100%}
+    /* Emergency landscape layout: keep navigation and every composer action,
+       but defer tabs/statistics until the keyboard closes. No document scrolling. */
+    :is(${T},${M})[data-dsh-pwa-compact] [data-slot="conversation.header"] header{min-height:44px;padding-top:6px;padding-bottom:6px}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-conversation-tabs],
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-dock]{display:none}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-card]{flex-direction:row;align-items:center;padding:4px;gap:4px}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-input-scroll]{flex:1;min-width:0;max-height:44px;margin:0}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-card]>div:last-child{flex:0 1 340px;width:44vw;max-width:48%;flex-wrap:nowrap;gap:4px;padding:0}
+    /* A compact viewport has no room for the normal toolbar + 80px offset.
+       Give the inline picker the visible surface while it covers the composer. */
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-overlay] [data-menu-material]:has(>input){position:fixed!important;left:12px;right:12px;bottom:auto;width:auto;top:4px;max-height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important}
+    /* Trigger suggestions (the + and / lists) are a different surface from
+       filtered pickers. Their anchored viewport can collapse to zero in compact
+       mode; use the visible viewport and let the option list scroll internally. */
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-seat]:has([data-trigger-menu]){z-index:25}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-overlay] [data-trigger-menu]{position:fixed!important;left:12px!important;right:12px!important;top:4px!important;bottom:auto!important;width:auto!important;max-width:calc(100vw - 24px);height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important;max-height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important;display:flex;flex-direction:column;overflow:hidden;z-index:40}
+    :is(${T},${M})[data-dsh-pwa-compact] [data-trigger-menu] [role=listbox]{flex:1 1 auto;height:auto!important;min-height:0;max-height:none!important;overflow-y:auto}
     .dsh-pwa-toolbar{position:fixed;top:0;left:0;right:0;height:var(--dsh-pwa-top);padding:env(safe-area-inset-top,0px) max(8px,${SAFE_R}) 0 max(8px,${SAFE_L});box-sizing:border-box;display:flex;align-items:center;gap:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-bottom:.5px solid var(--dsw-alias-border-l3);pointer-events:auto}
     .dsh-pwa-toolbar strong{font-size:14px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .dsh-pwa-menu{border:0;padding:0;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:transparent;cursor:pointer;flex:none;-webkit-app-region:no-drag}
@@ -391,6 +517,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     .dsh-pwa-menu:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-3px}
     @media (hover:hover){.dsh-pwa-menu:hover{background:var(--dsw-alias-interactive-bg-hover)}}
     .dsh-pwa-scrim{position:fixed;top:var(--dsh-pwa-cover);left:calc(var(--dsh-pwa-drawer) + ${SAFE_L});right:0;height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-cover));border:0;padding:0;background:#0005;pointer-events:auto}
+    ${M}:has(${FRAME}[data-sidebar-collapsed]) .dsh-pwa-scrim{display:none}
     @media (prefers-reduced-motion:reduce){${M} ${FRAME}>div,${M} [data-sidebar-right-panel] *{transition:none!important;animation:none!important}}
   `
   const settingsCss = `
@@ -458,17 +585,28 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const originalInert = new Map([center, sidebar].filter(Boolean).map(el => [el, el.inert]))
       const isOpen = () => !frame.hasAttribute('data-sidebar-collapsed')
       let previous = null, timer
-      let drawerOpener = null
+      let drawerOpener = null, returnFromRight = false
       const sync = () => {
         const next = right && openRightPanel(right) ? 'right' : isOpen() ? 'left' : null
         mobile.chrome.set({ open: next })
         if (center) center.inert = originalInert.get(center) || next !== null
         if (sidebar) sidebar.inert = originalInert.get(sidebar) || next !== 'left'
+        // The header menu is inside center: wait until the right occupant closes
+        // and center is no longer inert before returning Escape focus to it.
+        if (returnFromRight && next !== 'right') {
+          returnFromRight = false
+          if (!document.querySelector('[role=dialog],[role=menu]')) mobile.focusMenu()
+        }
         // Return focus only when it was inside the surface that is closing.
         if (previous !== 'left' && next === 'left' && !document.querySelector('[role=dialog]')) sidebar?.querySelector('button')?.focus({ preventScroll: true })
         if (previous === 'left' && next !== 'left' && sidebar?.contains(document.activeElement)) mobile.focusMenu()
-        if (next !== 'left') { closing = false; clearTimeout(closingTimer); drawerOpener = null }
-        if (previous === 'left' && next === 'right') close()
+        if (next !== 'left') {
+          // Right-panel mutations can arrive before DSH commits the collapse.
+          // Do not clear the close guard while a hidden drawer is still open.
+          if (!isOpen()) { closing = false; clearTimeout(closingTimer) }
+          drawerOpener = null
+        }
+        if (next === 'right' && isOpen()) close()
         previous = next
       }
       // Hold the guard until the collapsed attribute updates. A second toggle in the
@@ -521,9 +659,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         const newSession = target.closest('button')?.getAttribute('aria-label') === locale.bind('sidebar')('session.new.label')
         const nav = target.closest('nav button')
         const session = target.closest('[data-row-key^="session:"]') && !target.closest('button,input')
+        // Search reselection can leave both the route and main child unchanged.
+        const searchSession = target.closest('[role=treeitem][aria-selected]') && !target.closest('[data-row-key]') && !target.closest('button,input')
+        const group = target.closest('[data-row-key^="workspace:"]')
+        // rc.2 workspace actions end with New session; the preceding menu stays open.
+        const workspaceNew = group && target.closest('button') === [...group.querySelectorAll('button')].at(-1)
         // The second click of a title double-click opens rename. Leave the drawer up.
         if (event.detail > 1) { clearTimeout(timer); return }
-        if (newSession || nav) { clearTimeout(timer); timer = setTimeout(close) }
+        if (newSession || nav || searchSession || workspaceNew) { clearTimeout(timer); timer = setTimeout(close) }
         else if (session) { clearTimeout(timer); timer = setTimeout(close, 400) }
       }
       const onDialog = node => {
@@ -547,15 +690,20 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
           return
         }
         if (menuOpen || event.defaultPrevented) return
-        if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
+        if (previous === 'right') { event.preventDefault(); returnFromRight = true; closePanel() }
+        else if (previous === 'left') { event.preventDefault(); close(); mobile.focusMenu() }
       }
       document.addEventListener('pointerdown', noteDrawerGesture, true)
       document.addEventListener('focusin', noteDrawerFocus, true)
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
+      // Pending focus returns are owned by this effect; cleanup cancels them so a
+      // late callback cannot move focus after the drawer surface unmounts.
+      let disposed = false, restoreFrame, restoreTimeout
       const restoreDrawerFocus = () => {
         const opener = drawerOpener
         const back = () => {
+          if (disposed) return
           if (document.querySelector('[role=dialog][aria-modal="true"]')) return
           if (!(opener instanceof HTMLElement) || !opener.isConnected || opener.closest('[inert]')) return
           // The row action is display:none until the row is hovered, and a collapsed copy of the row has no box. Focus the visible title.
@@ -569,8 +717,9 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         }
         // The menu item DSH would restore is already gone, and the sidebar can still be inert in the same turn.
         back()
-        requestAnimationFrame(back)
-        setTimeout(back, 0)
+        cancelAnimationFrame(restoreFrame); clearTimeout(restoreTimeout)
+        restoreFrame = requestAnimationFrame(back)
+        restoreTimeout = setTimeout(back, 0)
       }
       let dialogWatch
       const armDialogWatch = () => {
@@ -611,6 +760,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) && !drawerDialogKeepsDrawer({ settings: settingsDialog(document.body), modal: true, focusInSidebar: focusInSidebar() }) })) close()
       sync()
       return () => {
+        disposed = true; cancelAnimationFrame(restoreFrame); clearTimeout(restoreTimeout)
         clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); dialogWatch?.disconnect(); routeWatch.disconnect()
         document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
@@ -795,5 +945,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileChrome, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
 } })
