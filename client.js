@@ -684,9 +684,13 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       document.addEventListener('focusin', noteDrawerFocus, true)
       document.addEventListener('click', onClick, true)
       window.addEventListener('keydown', onKey, true)
+      // Pending focus returns are owned by this effect; cleanup cancels them so a
+      // late callback cannot move focus after the drawer surface unmounts.
+      let disposed = false, restoreFrame, restoreTimeout
       const restoreDrawerFocus = () => {
         const opener = drawerOpener
         const back = () => {
+          if (disposed) return
           if (document.querySelector('[role=dialog][aria-modal="true"]')) return
           if (!(opener instanceof HTMLElement) || !opener.isConnected || opener.closest('[inert]')) return
           // The row action is display:none until the row is hovered, and a collapsed copy of the row has no box. Focus the visible title.
@@ -700,8 +704,9 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         }
         // The menu item DSH would restore is already gone, and the sidebar can still be inert in the same turn.
         back()
-        requestAnimationFrame(back)
-        setTimeout(back, 0)
+        cancelAnimationFrame(restoreFrame); clearTimeout(restoreTimeout)
+        restoreFrame = requestAnimationFrame(back)
+        restoreTimeout = setTimeout(back, 0)
       }
       let dialogWatch
       const armDialogWatch = () => {
@@ -742,6 +747,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       if (drawerShouldClose({ open: isOpen(), modal: openedDialog(document.body) && !drawerDialogKeepsDrawer({ settings: settingsDialog(document.body), modal: true, focusInSidebar: focusInSidebar() }) })) close()
       sync()
       return () => {
+        disposed = true; cancelAnimationFrame(restoreFrame); clearTimeout(restoreTimeout)
         clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); dialogWatch?.disconnect(); routeWatch.disconnect()
         document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)

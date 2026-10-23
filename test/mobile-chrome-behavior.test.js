@@ -230,3 +230,23 @@ test('right-panel mutations do not toggle twice before the hidden drawer collaps
   f.frame.setAttribute('data-sidebar-collapsed', ''); f.notify()
   f.frame.removeAttribute('data-sidebar-collapsed'); f.notify(); assert.equal(requested, 2)
 })
+
+test('unmount right after a drawer dialog closes cancels the pending focus return', async t => {
+  const f = await fixture(t, { leftOpen: true }); f.render()
+  // A rename/confirm dialog opened from the drawer keeps it open and later returns focus to the opener.
+  f.fire('pointerdown', { target: f.first })
+  const dialog = f.el('div', { role: 'dialog', 'aria-modal': 'true' }, f.body)
+  const bodyWatch = f.observers.find(o => o.connected && o.targets.some(({ target, options }) => target === f.body && options.childList && !options.subtree))
+  bodyWatch.callback([{ addedNodes: [dialog] }])
+  assert.equal(f.toggles, 0, 'a dialog from the drawer keeps the drawer')
+  f.body.children.splice(f.body.children.indexOf(dialog), 1)
+  const dialogWatch = f.observers.find(o => o.connected && o.targets.some(({ target, options }) => target === f.body && options.subtree))
+  dialogWatch.callback([])
+  assert.equal(f.body.doc.activeElement, f.first, 'focus returns to the drawer opener')
+  assert.ok(f.raf.pending.size > 0 && f.timers.pending.size > 0, 'late retries are scheduled')
+  // The user moves on, then the chrome unmounts before the retries run.
+  const elsewhere = f.el('input', {}, f.body); elsewhere.focus(); f.unmount()
+  assert.equal(f.raf.pending.size, 0); assert.equal(f.timers.pending.size, 0)
+  f.raf.drain(); f.timers.drain()
+  assert.equal(f.body.doc.activeElement, elsewhere, 'no stale retry steals focus after unmount')
+})
