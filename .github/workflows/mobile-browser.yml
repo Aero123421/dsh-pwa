@@ -10,6 +10,7 @@ on:
       - 'test/**'
       - 'scripts/browser-check.mjs'
       - 'scripts/pwa-proxy-check.mjs'
+      - 'scripts/touch-scroll-check.mjs'
       - '.github/workflows/mobile-browser.yml'
 permissions:
   contents: read
@@ -33,13 +34,16 @@ jobs:
       - run: npm run test:browser
         env:
           DSH_TELEMETRY_MODE: DISABLED
+      - run: npm run test:touch
+        env:
+          DSH_TELEMETRY_MODE: DISABLED
       - name: Collect isolated browser evidence
         if: always()
         shell: bash
         run: |
           mkdir -p /tmp/pwa-browser-evidence
           shopt -s nullglob
-          for image in /tmp/dsh-pwa-smoke-*/*.png; do cp "$image" /tmp/pwa-browser-evidence/; done
+          for image in /tmp/dsh-pwa-smoke-*/*.png /tmp/dsh-pwa-touch-*/*.png; do cp "$image" /tmp/pwa-browser-evidence/; done
           # Only the freshly generated fixture's bootstrap command log is printed.
           # Server logs and authentication URLs are not uploaded.
           for log in /tmp/dsh-pwa-smoke-*/command.log; do

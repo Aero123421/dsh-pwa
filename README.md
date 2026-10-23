@@ -103,6 +103,20 @@ The choice is saved in that browser's `localStorage` only, so a phone and a desk
 - Settings puts its title, actions and close button on one row, with a horizontally scrollable navigation strip below. The PWA & Mobile section uses the same text sizes and colors as the built-in settings rows.
 - DOM observation is limited to the frame state and right panel rather than every streaming conversation update.
 
+### Touch screens
+
+Touch adjustments apply whenever `(any-pointer: coarse)` matches, independently of Auto / On / Off. An iPad using the stock layout gets these adjustments too; **Off does not disable touch adjustments**.
+
+- `html` and `body` suppress page overscroll, and the conversation contains vertical scroll chaining. This also suppresses Android pull-to-refresh and overscroll navigation. Actual iOS rubber-band behavior still needs device verification.
+- Double-tap zoom is disabled with low-specificity `touch-action: manipulation`; pinch zoom and DSH's explicit touch-action rules remain available. On a coarse-primary device, conversation width handles pass swipes through instead of resizing. Wide tables scroll sideways.
+- The existing visual-viewport height and pan tracking also runs on touch tablets. Phone statistics hide while the keyboard is detected. Long drafts have a viewport-based height cap. At visible height ≤260px and width ≥max(480px, twice that height), compact mode keeps the menu/header, hides tabs/statistics, and puts the composer on one row. Trigger suggestions and model/permission pickers fit the visible area.
+- Modal dialogs use the visible viewport, including its pan offset. An obscured focused input inside a modal scrolls into view; composer scrolling stays with DSH. Question footers wrap and provider tabs share equal-width columns.
+- Sidebar row actions are visible without hover. On phones, rows and menu items are at least 44px high; pin/archive remain available in the … menu rather than as duplicate row buttons. Reselecting a search result or reusing a workspace's New session draft also closes the drawer.
+- Main composer controls, slash suggestions, message/code/process/tool controls, file rows, document tools/zoom, and this plugin's settings controls gain 44px targets. Settings switches keep their track size and expand only the hit area. This is not a claim that every DSH control is 44px.
+- Escape closes an open right panel and returns focus to the menu after the panel closes; modal dialogs and menus keep ownership of Escape. A right panel cannot leave an open drawer hidden underneath it.
+
+Touch CSS is scoped under `html[data-dsh-touch]`; shared viewport rules use the mobile or touch scope. The plugin does not write conversation scroll positions. OS keyboard/IME, safe areas, screen readers and home-screen installation require real-device checks.
+
 Mobile CSS is scoped under `html[data-dsh-mobile]`, and the controls use the official `conversation.header.leading` and `shell.overlay` slots; no DSH file is changed. The rules target slot markers, data attributes, the stable `md-table-wide` class and direct wrappers rather than generated class names. This remains an internal DOM dependency, checked against **0.2.1-alpha.3** and **0.2.1-rc.2** — switch to **Off** if a future DSH release changes that structure. [Root causes and verification notes](docs/mobile-pwa-verification.md).
 
 ## Plugin updates
@@ -119,7 +133,7 @@ Operation IDs are saved before the first request. The Host stores only update me
 
 Plugin updates keep the manifest name, `start_url: './'`, and `scope: './'`. The any-purpose icons stay at `./pwa/icon-192.png` and `./pwa/icon-512.png`. The manifest also publishes `./pwa/icon-192-maskable.png` and `./pwa/icon-512-maskable.png` for Android adaptive icons. Home-screen icon refresh is a separate browser operation; remove and add the shortcut again when necessary. This plugin has no service worker and never removes other workers or caches. It registers `en` and `ja` dictionaries and does not define the `ja` language. 日本語表示には dsh-japanese が必要です（[dsh-japanese](https://github.com/Aero123421/dsh-japanese)）。Without that language pack, this plugin's Japanese dictionary is not selected and the controls stay in English. It does not register a `zh` dictionary. DSH's built-in `zh` language, shown with the document language zh-CN, uses a `zh` dictionary when this plugin registers one. With none, DSH shows the English copy and does not show message keys.
 
-[Current release notes](docs/release-0.4.2.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
+[Current release notes](docs/release-0.4.3.md). Stable `v*` tags on reviewed `main` commits run the release workflow, verify the version and tests, and publish a GitHub Release with the packed plugin and `SHA256SUMS`. This does not publish to npm.
 
 ## Test
 
@@ -132,13 +146,16 @@ npx playwright install --with-deps chromium
 node scripts/pwa-proxy-check.mjs
 npm pack --ignore-scripts
 npm run test:browser
+npm run test:touch
 ```
 
 `npm run check:dsh-peer` needs network. It installs the published `@deepseek-ai/dsh-app-boot@alpha` in a temporary directory and compares `evaluatePluginCompatibility` with this package's peer check. It does not start DSH.
 
-Node's built-in runner checks the mobile mode store, the landscape and keyboard viewport handling, the header-menu/top-bar switch, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
+Node's built-in runner checks touch attribute/viewport/compact handling, geometry read-before-write, modal input reveal and disposal, executable right-panel Escape/hidden-drawer/cleanup behavior, the mobile mode store, the landscape and keyboard viewport handling, the header-menu/top-bar switch, static routes, optional-service composition, update metadata/results, operation ownership, reconnects, profile isolation, cleanup, restore after a failed replacement, maskable icon safe zone, manifest normalization and install-prompt lifecycle.
 
 The Playwright smoke installs the packed package and dsh-japanese into an isolated real DSH profile and restarts it. It checks the browser-selected manifest, decoded Apple icon, Settings at 320/360/390/600/1280px, the 767/768px boundary, saved modes, the header menu and the top-bar fallback, drawers and reselection, a sideways-scrolling wide table, files, composer text size, a touch phone in landscape, light/dark appearance, reduced motion and desktop recovery. The smoke opens either the visible Settings button (alpha.2) or Account menu → Settings (alpha.3). Japanese comes from dsh-japanese. Model requests go to a local stub inside the script that returns one fixed Markdown reply; no model API is called.
+
+`npm run test:touch` installs the packed plugin into a disposable DSH profile and streams a long answer from a local stand-in Messages API. Chromium raw touch events check two-way conversation scrolling, top-edge overscroll, header swipes, page scroll 0 and computed touch/overscroll rules at iPad 820×1180 (stock layout) and phone 390×844 (mobile layout). It does not emulate iOS rubber-band physics.
 
 The separate proxy regression uses the production metadata routes behind a cookie gate at `/ui/` with mobile/touch emulation. It checks the missing-credentials failure as a negative control, then credentialed server discovery and repair of an already open page. It does not connect to a user's proxy or credentials.
 

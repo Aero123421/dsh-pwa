@@ -1,6 +1,6 @@
 {
   "name": "dsh-pwa",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "PWA & Mobile for DeepSeek Harness Web: installable iOS/iPadOS and browser PWA icons plus a switchable phone layout",
   "type": "module",
   "main": "./index.js",
@@ -39,6 +39,7 @@
   "scripts": {
     "test": "node --test",
     "pack:plugin": "npm pack --ignore-scripts",
+    "test:touch": "node scripts/touch-scroll-check.mjs",
     "test:browser": "node scripts/browser-check.mjs",
     "check:dsh-peer": "node scripts/check-dsh-peer.mjs"
   },

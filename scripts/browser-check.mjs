@@ -432,6 +432,35 @@ try {
         assert.equal(await table.evaluate(el => getComputedStyle(el).overflowX), 'auto', 'wide tables scroll on touch screens without hover')
         assert.ok(await table.evaluate(el => { el.scrollLeft = el.scrollWidth; return el.scrollLeft > 0 }), 'wide table scrolls horizontally')
         await page.screenshot({ path: join(world, 'mobile-table.png'), animations: 'disabled' })
+        // Reselecting a search result need not change the route or main child.
+        // Exercise the real treeitem rather than treating a normal session row as search.
+        await page.evaluate(async sessionId => {
+          await window.__pwaTestContext.get('sessions').using(sessionId, { source: 'workspaceOperation' }, record => record.binding.session.rename('PWA search fixture'))
+        }, id)
+        await drawer()
+        const searchLabels = await page.evaluate(() => {
+          const t = window.__pwaTestContext.locale.bind('workspace')
+          return { open: t('search.sessions.aria'), placeholder: t('search.placeholder'), clear: t('search.clear') }
+        })
+        await page.getByRole('button', { name: searchLabels.open, exact: true }).click()
+        await page.getByPlaceholder(searchLabels.placeholder).fill('PWA search fixture')
+        await page.locator('[data-slot=sidebar] [role=treeitem][aria-selected]').first().click()
+        await page.waitForFunction(() => document.querySelector('[data-slot=root]>div')?.hasAttribute('data-sidebar-collapsed'))
+        await drawer()
+        await page.getByPlaceholder(searchLabels.placeholder).fill('')
+        await page.keyboard.press('Escape')
+        // The workspace row's last button creates a draft; repeat to cover reuse
+        // where route/main observers have no new view to observe.
+        for (let count = 0; count < 2; count++) {
+          if (await page.evaluate(() => document.querySelector('[data-slot=root]>div')?.hasAttribute('data-sidebar-collapsed'))) await drawer()
+          const workspaceRow = page.locator('[data-slot=sidebar] [data-row-key^="workspace:"]').filter({ visible: true }).first()
+          // This context has a mouse, not touch: stock DSH reveals row actions on hover.
+          await workspaceRow.hover()
+          await workspaceRow.locator('button').last().click()
+          await page.waitForFunction(() => document.querySelector('[data-slot=root]>div')?.hasAttribute('data-sidebar-collapsed'))
+        }
+        await page.evaluate(sessionId => window.__pwaTestContext.get('uiWorkspace').openSession(sessionId), id)
+        await page.locator(`[data-conversation-session="${id}"]`).waitFor()
       }
       const panelToggle = page.locator('[data-sidebar-right-panel][data-sidebar-right-open] button[data-sidebar-right-toggle]')
       await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
@@ -440,8 +469,11 @@ try {
       const right = await page.locator('[data-sidebar-right-panel][data-sidebar-right-open]').boundingBox()
       assert.ok(Math.abs(right.width - 390) < 1 && Math.abs(right.x) < 1, 'files use the entire phone width')
       await page.screenshot({ path: join(world, 'mobile-right-panel.png'), animations: 'disabled' })
-      await panelToggle.click()
+      await page.evaluate(() => window.__pwaTestContext.get('layout').toggleSidebar())
+      await page.waitForFunction(() => document.querySelector('[data-slot=root]>div')?.hasAttribute('data-sidebar-collapsed'))
+      await page.keyboard.press('Escape')
       await page.waitForFunction(() => !window.__pwaTestContext.get('sidebarRight').isExpanded())
+      await page.waitForFunction(() => document.activeElement?.classList.contains('dsh-pwa-menu'))
       await page.getByRole('button', { name: '右サイドバーを開く', exact: true }).click()
       await panelToggle.waitFor()
       await page.getByText('ワークスペースのファイル', { exact: true }).click()
@@ -550,7 +582,7 @@ try {
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via dsh-japanese 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, ${restart === 0 ? 'rename dialog keeps the drawer, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via dsh-japanese 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, right Escape/focus and hidden-drawer collapse, ${restart === 0 ? 'rename dialog keeps the drawer, search reselection and workspace draft reuse close it, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }
