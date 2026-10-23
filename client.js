@@ -359,18 +359,26 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const baseline = this.viewportBaseline
       const reference = baseline?.width === width ? Math.max(baseline.height, height) : height
       this.viewportBaseline = { width, height: reference }
-      const keyboard = (typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
-        || (editable && reference - height > KEYBOARD_MIN)
+      const overlayKeyboard = typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN
+      const keyboard = overlayKeyboard || (editable && reference - height > KEYBOARD_MIN)
+      // A terminal resizes its shell (SIGWINCH) whenever its box changes, and shells
+      // reprint the prompt on every resize. While a terminal has focus under an
+      // overlay (iOS-style) keyboard, keep the full layout height and let the
+      // browser pan to the cursor, as stock DSH does. Android's resizing keyboard
+      // shrinks the window itself and is left unchanged.
+      const holdTerminal = overlayKeyboard && !!active?.closest?.('.xterm')
+      const layoutHeight = holdTerminal ? Math.round(windowHeight) : height
       // Ignore 1–3px viewport noise relative to the last committed size, not the
       // last event. Keyboard transitions and width changes must still land at once.
       const size = this.viewportSize
-      if (!size || keyboard !== this.keyboard || width !== size.width || Math.abs(height - size.height) >= VIEWPORT_MIN_CHANGE) {
-        style.setProperty('--dsh-pwa-viewport', `${height}px`)
-        this.viewportSize = { width, height }
+      if (!size || keyboard !== this.keyboard || width !== size.width || Math.abs(layoutHeight - size.height) >= VIEWPORT_MIN_CHANGE) {
+        style.setProperty('--dsh-pwa-viewport', `${layoutHeight}px`)
+        this.viewportSize = { width, height: layoutHeight }
       }
       // Only keyboard panning needs compensation. Standalone overscroll can report
       // a small offset without a keyboard; translating the app would amplify it.
-      const shift = keyboard && top ? `translateY(${top}px)` : ''
+      // A held terminal relies on the browser's own pan, so it is not countered.
+      const shift = keyboard && top && !holdTerminal ? `translateY(${top}px)` : ''
       if (shift !== this.viewportShift) {
         if (shift) style.setProperty('--dsh-pwa-shift', shift)
         else style.removeProperty('--dsh-pwa-shift')
