@@ -7,6 +7,12 @@ test('coarse-primary touch screens pass width-handle swipes through without disa
   assert.ok(source.includes('@media(pointer:coarse){${T} [data-width-handle]{pointer-events:none}}'))
 })
 
+test('touch process bodies share the conversation scrollport without changing desktop caps', async () => {
+  const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  assert.ok(source.includes('${T} [data-step-process-body]{max-height:none;overflow:visible;mask-image:none}'))
+  assert.ok(source.includes('${T} [data-conversation-scroll]{overscroll-behavior-y:none}'))
+})
+
 test('phone question footers wrap actions without changing desktop or tablet cards', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   assert.ok(source.includes('${M} [data-question-key]>section>footer{flex-wrap:wrap;gap:8px}'))
@@ -34,11 +40,16 @@ test('touch workspace rows and document tools grow in their own header seats', a
   assert.ok(source.includes('${T} [data-document-zoom-controls] button{min-width:44px;min-height:44px}'))
 })
 
-test('trigger suggestions use a scrollable visible surface only in compact mode', async () => {
+test('inline menus retain host anchors and row sizes, with measured caps only in constrained viewports', async () => {
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
-  assert.ok(source.includes(':is(${T},${M})[data-dsh-pwa-compact] [data-composer-seat]:has([data-trigger-menu]){z-index:25}'))
-  assert.ok(source.includes(':is(${T},${M})[data-dsh-pwa-compact] [data-composer-overlay] [data-trigger-menu]{position:fixed!important;'))
-  assert.ok(source.includes(':is(${T},${M})[data-dsh-pwa-compact] [data-trigger-menu] [role=listbox]{flex:1 1 auto;height:auto!important;min-height:0;max-height:none!important;overflow-y:auto}'))
+  assert.ok(source.includes(':not([data-composer-overlay] button)'))
+  assert.ok(source.includes(':is(${M},${T}) [data-composer-seat]:has([data-composer-overlay] [data-menu-material]){z-index:25}'))
+  assert.ok(source.includes(':is([data-dsh-mobile-keyboard],[data-dsh-pwa-compact]) [data-composer-overlay] [data-menu-material]{max-height:min(320px,var(--dsh-pwa-menu-room,320px))!important;translate:0 var(--dsh-pwa-menu-shift,0px)}'))
+  assert.ok(source.includes('[data-trigger-menu]{max-height:min(400px,var(--dsh-pwa-menu-room,400px))!important}'))
+  assert.doesNotMatch(source, /\[data-composer-overlay\][^\n]+position:fixed/)
+  assert.doesNotMatch(source, /\[role=menu\] \[role=menuitem\]\{min-height:44px|\[id\^=dsh-slash-option-\]\{min-height:44px/)
+  assert.ok(source.includes("overlay.style.removeProperty('--dsh-pwa-menu-room')"))
+  assert.ok(source.includes('watch.disconnect(); clear()'))
 })
 
 

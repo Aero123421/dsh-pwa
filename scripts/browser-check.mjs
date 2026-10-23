@@ -356,8 +356,14 @@ try {
       const header = await page.locator('[data-slot="conversation.header"] > header').boundingBox()
       assert.ok(header.height <= 72, `conversation header stays compact: ${header.height}`)
       if (restart === 0) {
-        await page.locator('[data-composer-input]').fill('Show the fixture table.')
-        await page.locator('[data-composer-input]').press('Enter')
+        // Mobile layout: a trusted Enter edits (new line) and never submits; the button sends.
+        const composer = page.locator('[data-composer-input]')
+        await composer.click(); await page.keyboard.type('First line'); await page.keyboard.press('Enter'); await page.keyboard.type('second line')
+        await page.waitForTimeout(300)
+        const draft = await composer.evaluate(el => el.innerText)
+        assert.match(draft, /First line\s*\n+\s*second line/, `mobile Enter inserts a line break instead of sending: ${JSON.stringify(draft)}`)
+        await composer.fill('Show the fixture table.')
+        await page.getByRole('button', { name: /Send message|送信|发送/ }).click()
         await page.getByText('End of fixture reply.', { exact: true }).waitFor({ timeout: 30000 })
         await drawer()
         await page.evaluate(sessionId => {

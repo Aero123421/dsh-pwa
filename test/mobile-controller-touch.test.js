@@ -18,9 +18,9 @@ function query(matches) {
 }
 async function fixture({ touch = true, narrow = false } = {}) {
   const { MobileController } = await clientExports()
-  const attrs = new Set(), props = new Map(), order = [], focus = new Set(), focusEvents = new Map(), vvEvents = new Map()
+  const attrs = new Set(), props = new Map(), order = [], styleCalls = [], focus = new Set(), focusEvents = new Map(), vvEvents = new Map()
   const root = { toggleAttribute: (key, on) => { order.push('write'); on ? attrs.add(key) : attrs.delete(key) }, removeAttribute: key => attrs.delete(key),
-    style: { setProperty: (key, value) => { order.push('write'); props.set(key, value) }, removeProperty: key => { order.push('write'); props.delete(key) } } }
+    style: { setProperty: (key, value) => { order.push('write'); styleCalls.push({ key, value }); props.set(key, value) }, removeProperty: key => { order.push('write'); styleCalls.push({ key, value: null }); props.delete(key) } } }
   const document = { activeElement: null,
     addEventListener: (type, fn) => { focus.add(fn); focusEvents.set(type, fn) },
     removeEventListener: (type, fn) => { focus.delete(fn); focusEvents.delete(type) } }
@@ -28,7 +28,7 @@ async function fixture({ touch = true, narrow = false } = {}) {
   const viewport = { height: 844, width: 810, offsetTop: 0, scale: 1, addEventListener: (type, fn) => vvEvents.set(type, fn), removeEventListener: type => vvEvents.delete(type) }
   const coarse = query(touch), small = query(narrow)
   const mobile = new MobileController({ root, view, viewport, storage: null, matchMedia: q => q.includes('any-pointer') ? coarse : small })
-  return { mobile, attrs, props, order, focus, focusEvents, vvEvents, viewport, document, view, coarse, small }
+  return { mobile, attrs, props, order, styleCalls, focus, focusEvents, vvEvents, viewport, document, view, coarse, small }
 }
 
 test('touch attribute and viewport follow any-pointer independently of mobile mode, with full cleanup', async () => {
@@ -117,4 +117,65 @@ test('modal focus is revealed on keyboard measure and short-viewport focusin, ex
   modal = true; editable = false; focus(); assert.equal(scrolled.length, 2)
   editable = true; f.viewport.height = 844; f.mobile.measure(); focus(); assert.equal(scrolled.length, 2)
   f.mobile.dispose(); focus(); assert.equal(scrolled.length, 2)
+})
+
+
+test('viewport event pairs with unchanged or 1–2px geometry noise do not write CSS', async () => {
+  const f = await fixture(); f.styleCalls.length = 0
+  for (let i = 0; i < 60; i++) {
+    f.viewport.height = 844 - [0, 1, 0, 2, 1, 0][i % 6]
+    f.viewport.offsetTop = [0, 1, 0, 2, 1, 0][i % 6]
+    f.vvEvents.get('scroll')(); f.vvEvents.get('resize')()
+  }
+  assert.equal(f.styleCalls.length, 0)
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '844px')
+  assert.equal(f.props.has('--dsh-pwa-shift'), false)
+  assert.equal(f.attrs.has('data-dsh-mobile-keyboard'), false)
+  f.mobile.dispose()
+})
+
+test('height hysteresis uses the last committed height and width changes land immediately', async () => {
+  const f = await fixture(); f.styleCalls.length = 0
+  for (const h of [843, 842, 841]) { f.viewport.height = h; f.mobile.measure() }
+  assert.equal(f.styleCalls.length, 0)
+  f.viewport.height = 840; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '840px')
+  f.viewport.height = 839; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '840px')
+  f.viewport.width = 1080; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '839px')
+  assert.equal(f.mobile.viewportBaseline.width, 1080)
+  assert.equal(f.mobile.viewportBaseline.height, 839)
+  f.mobile.dispose()
+})
+
+test('keyboard transitions bypass height hysteresis and shift applies only while detected', async () => {
+  const f = await fixture()
+  f.viewport.offsetTop = 40; f.mobile.measure()
+  assert.equal(f.props.has('--dsh-pwa-shift'), false)
+  f.viewport.height = 724; f.mobile.measure()
+  assert.equal(f.attrs.has('data-dsh-mobile-keyboard'), false)
+  f.viewport.height = 723; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '723px')
+  assert.equal(f.props.get('--dsh-pwa-shift'), 'translateY(40px)')
+  assert.ok(f.attrs.has('data-dsh-mobile-keyboard'))
+  f.styleCalls.length = 0; f.mobile.measure()
+  assert.equal(f.styleCalls.length, 0)
+  f.viewport.offsetTop = 41; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-shift'), 'translateY(41px)')
+  f.viewport.height = 724; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '724px')
+  assert.equal(f.props.has('--dsh-pwa-shift'), false)
+  assert.equal(f.attrs.has('data-dsh-mobile-keyboard'), false)
+  f.mobile.dispose()
+})
+
+test('touch tracking resets committed geometry so reactivation writes a fresh small size change', async () => {
+  const f = await fixture()
+  f.coarse.set(false)
+  assert.equal(f.mobile.viewportSize, null); assert.equal(f.mobile.viewportShift, null)
+  f.viewport.height = 842; f.coarse.set(true)
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '842px')
+  f.mobile.dispose()
+  assert.equal(f.mobile.viewportSize, null); assert.equal(f.mobile.viewportShift, null)
 })
