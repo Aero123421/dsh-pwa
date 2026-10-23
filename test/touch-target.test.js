@@ -17,4 +17,5 @@ test('PWA-owned actions and manual release link gain 44px touch targets only und
   const source = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   assert.ok(source.includes(':is(${M},${T}) :is(.dsh-pwa-actions button,.dsh-pwa-segment button){min-width:44px;min-height:44px}'))
   assert.ok(source.includes('${T} .dsh-pwa-link{display:flex;align-items:center;min-height:44px'))
+  assert.ok(source.includes('${T} .dsh-pwa-segment{grid-template-columns:repeat(auto-fit,minmax(44px,1fr))}'))
 })
