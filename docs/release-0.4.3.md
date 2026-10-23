@@ -7,11 +7,11 @@ Touch improvements on top of the published v0.4.2 layout and settings UI.
 ## Changes
 
 - Touch adjustments also apply to tablets using the stock layout, independently of the mobile switch. Page overscroll is suppressed, conversations contain vertical chaining, and wide tables pan sideways. Coarse-primary width handles pass swipes through; finger resizing is unavailable. Double-tap zoom is disabled, but pinch zoom and DSH's explicit touch-action rules are retained.
-- Visual-viewport height and pan tracking now also covers touch tablets. Phone statistics hide when the keyboard is detected; compact landscape keeps the header/menu, hides tabs/statistics and uses a one-row composer. Tall drafts and trigger/model/permission pickers fit the visible viewport.
+- Visual-viewport height and pan tracking now also covers touch tablets. Android's resizing keyboard is detected while an input has focus, and phone statistics hide when the keyboard is detected; compact landscape keeps the header/menu, hides tabs/statistics and uses a one-row composer. Tall drafts and trigger/model/permission pickers fit the visible viewport.
 - Modal surfaces follow the visible viewport and pan offset. Obscured focused modal inputs scroll into view. Question footers wrap and narrow provider tabs share equal-width columns.
-- Sidebar actions no longer require hover. Phone rows/menu items, main composer controls, message/code/process/tool actions, file/document/zoom controls and PWA settings gain 44px touch targets; settings switches keep their visual track size. Phone pin/archive actions remain in the … menu.
+- Sidebar actions no longer require hover. Phone rows/menu items, main composer controls, message/code/process/tool actions, file/document/zoom controls and PWA settings gain 44px touch targets; settings switches keep their visual track size. The PWA mode buttons wrap instead of overlapping in narrow settings. Phone pin/archive actions remain in the … menu.
 - Reselecting a search result and reusing a workspace's New session draft close the drawer even without a route change.
-- Escape closes the right panel when no modal/menu owns it and returns focus to the header/fallback menu. A right panel cannot leave a hidden left drawer open. Existing v0.4.2 dialog and route handling is retained.
+- Escape closes the right panel when no modal/menu owns it and returns focus to the header/fallback menu. A right panel cannot leave a hidden left drawer open. Existing v0.4.2 dialog and route handling is retained, and a pending focus return after a drawer dialog is cancelled when the mobile layout unmounts.
 
 ## Install
 
@@ -41,11 +41,11 @@ GitHub source installs can also update from Settings. Restart DSH and reload the
 ## 変更点
 
 - タッチ修正をモバイル設定から分離し、標準レイアウトのタブレットにも適用。ページの overscroll を抑え、会話の縦連鎖を contain にし、表を横へ動かせます。タッチ主体の幅ハンドルはスワイプを素通しするため、指で幅調整できません。ダブルタップ拡大は無効、ピンチと本体の明示的 touch-action は保持します。
-- visualViewport の高さと pan への追従をタブレットへ拡張。スマホのキーボード検出中は統計を隠します。低い横長画面ではヘッダーとメニューを残し、タブ/統計を隠して入力欄を1行化。長文入力と候補/model/permission picker を可視高に収めます。
+- visualViewport の高さと pan への追従をタブレットへ拡張。Android のサイズが変わるキーボードも入力中に検出し、スマホのキーボード検出中は統計を隠します。低い横長画面ではヘッダーとメニューを残し、タブ/統計を隠して入力欄を1行化。長文入力と候補/model/permission picker を可視高に収めます。
 - modal の外枠を可視高と pan に追従させ、隠れた入力を見える位置へスクロール。質問 footer を折り返し、狭い provider タブを等幅にします。
-- sidebar 行操作を hover なしで表示。スマホ行/メニュー、入力欄主操作、メッセージ/コード/process/tool、file/document/zoom、PWA 設定を44px化。設定スイッチは見た目を保って当たり判定だけを拡張し、スマホの pin/archive は … メニューにまとめます。
+- sidebar 行操作を hover なしで表示。スマホ行/メニュー、入力欄主操作、メッセージ/コード/process/tool、file/document/zoom、PWA 設定を44px化。設定スイッチは見た目を保って当たり判定だけを拡張し、スマホの pin/archive は … メニューにまとめます。狭い設定でも PWA のモード切替ボタンは重ならず折り返します。
 - 検索結果の再選択や workspace 内の New session draft 再利用でも、route が変わらなくてもドロワーを閉じます。
-- modal/menu がないとき Escape で右パネルを閉じ、ヘッダー/上部バーのメニューへフォーカスを戻します。右の裏に開いた左ドロワーを残しません。v0.4.2 のダイアログ・route による閉鎖は保持します。
+- modal/menu がないとき Escape で右パネルを閉じ、ヘッダー/上部バーのメニューへフォーカスを戻します。右の裏に開いた左ドロワーを残しません。v0.4.2 のダイアログ・route による閉鎖は保持し、ドロワーのダイアログ後の遅延フォーカス復帰はモバイル表示の解除時に取り消します。
 
 ## 導入・更新
 
