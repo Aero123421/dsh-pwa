@@ -179,3 +179,34 @@ test('touch tracking resets committed geometry so reactivation writes a fresh sm
   f.mobile.dispose()
   assert.equal(f.mobile.viewportSize, null); assert.equal(f.mobile.viewportShift, null)
 })
+
+function focused(selector) {
+  return { matches: s => s.split(',').some(part => part.trim() === 'textarea'), isContentEditable: false, closest: s => s === selector ? {} : null }
+}
+
+test('an overlay keyboard over a focused terminal keeps the full layout height and no shift', async () => {
+  const f = await fixture()
+  f.document.activeElement = focused('.xterm')
+  f.viewport.height = 500; f.viewport.offsetTop = 40; f.mobile.measure()
+  assert.ok(f.attrs.has('data-dsh-mobile-keyboard'), 'still a keyboard for the rest of the UI')
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '844px', 'the terminal box, and so the shell size, stays put')
+  assert.equal(f.props.has('--dsh-pwa-shift'), false, 'the browser pans to the cursor instead')
+  f.viewport.height = 844; f.viewport.offsetTop = 0; f.mobile.measure()
+  assert.equal(f.props.get('--dsh-pwa-viewport'), '844px')
+  assert.equal(f.styleCalls.filter(call => call.key === '--dsh-pwa-viewport' && call.value !== '844px').length, 0, 'no terminal resize across open and close')
+  f.mobile.dispose()
+})
+
+test('the terminal hold applies only to the terminal and only to overlay keyboards', async () => {
+  const composer = await fixture()
+  composer.document.activeElement = focused('[data-composer-input]')
+  composer.viewport.height = 500; composer.viewport.offsetTop = 40; composer.mobile.measure()
+  assert.equal(composer.props.get('--dsh-pwa-viewport'), '500px'); assert.equal(composer.props.get('--dsh-pwa-shift'), 'translateY(40px)')
+  composer.mobile.dispose()
+  const resizing = await fixture()
+  resizing.document.activeElement = focused('.xterm')
+  // resizes-content: the window itself shrinks, so innerHeight follows the visual height.
+  resizing.view.height = 500; resizing.viewport.height = 500; resizing.mobile.measure()
+  assert.equal(resizing.props.get('--dsh-pwa-viewport'), '500px', 'a resizing keyboard shrinks the window; the plugin does not oversize the app')
+  resizing.mobile.dispose()
+})
