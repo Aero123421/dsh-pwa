@@ -275,10 +275,9 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       this.onChange = () => this.update()
       this.query?.addEventListener?.('change', this.onChange)
       this.touchQuery?.addEventListener?.('change', this.onChange)
-      this.onFocusIn = event => {
-        if (this.tracking && this.keyboard) this.revealModalInput(event.target)
-      }
+      this.onFocusIn = () => this.measure()
       this.document?.addEventListener?.('focusin', this.onFocusIn, true)
+      this.document?.addEventListener?.('focusout', this.onFocusIn, true)
       this.state = { mode: MODES.includes(mode) ? mode : 'auto', active: false }
       this.update(this.state.mode)
     }
@@ -310,6 +309,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         style.removeProperty('--dsh-pwa-viewport'); style.removeProperty('--dsh-pwa-shift')
         this.root.removeAttribute?.('data-dsh-mobile-keyboard')
         this.root.removeAttribute?.('data-dsh-pwa-compact'); this.keyboard = false
+        this.viewportBaseline = null
         return
       }
       // Pinch zoom also moves the visual viewport; keep the last unzoomed frame.
@@ -317,7 +317,15 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       const height = Math.round(viewport.height), top = Math.max(0, Math.round(viewport.offsetTop ?? 0))
       // Read window geometry before CSS writes: innerHeight can otherwise force layout.
       const windowHeight = this.view?.innerHeight, width = Math.round(viewport.width ?? this.view?.innerWidth ?? 0)
-      const keyboard = typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN
+      const active = this.document?.activeElement
+      const editable = !!(active?.matches?.('input,textarea,[contenteditable]:not([contenteditable=false])') || active?.isContentEditable)
+      // resizes-content shrinks both viewports. Keep the largest visible height
+      // at this width, but require editable focus so an ordinary resize is not a keyboard.
+      const baseline = this.viewportBaseline
+      const reference = baseline?.width === width ? Math.max(baseline.height, height) : height
+      this.viewportBaseline = { width, height: reference }
+      const keyboard = (typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
+        || (editable && reference - height > KEYBOARD_MIN)
       style.setProperty('--dsh-pwa-viewport', `${height}px`)
       // iOS pans the visual viewport over the page when the keyboard opens. Move the
       // app with it, or the shortened app stays at the top and the visible area is blank.
@@ -355,6 +363,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     dispose() {
       this.closed = true
       this.document?.removeEventListener?.('focusin', this.onFocusIn, true)
+      this.document?.removeEventListener?.('focusout', this.onFocusIn, true)
+      this.viewportBaseline = null
       this.touchQuery?.removeEventListener?.('change', this.onChange)
       this.viewport?.removeEventListener?.('resize', this.onViewport)
       this.viewport?.removeEventListener?.('scroll', this.onViewport)
