@@ -241,7 +241,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   // Phones in landscape are wider than 767px but too short for the desktop frame.
   const NARROW = '(max-width: 767px), (max-height: 500px) and (pointer: coarse)'
   // A visual viewport this much shorter than the window is treated as an open on-screen keyboard.
-  const TOUCH = '(any-pointer: coarse)', KEYBOARD_MIN = 120
+  const TOUCH = '(any-pointer: coarse)', KEYBOARD_MIN = 120, VIEWPORT_MIN_CHANGE = 4
   function createStore(state) {
     const listeners = new Set()
     return {
@@ -275,6 +275,35 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       this.onChange = () => this.update()
       this.query?.addEventListener?.('change', this.onChange)
       this.touchQuery?.addEventListener?.('change', this.onChange)
+      // Capture before Lexical's root keymap; leave beforeinput/default editing intact.
+      this.onComposerEnter = event => {
+        if (!this.state.active || event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+        const input = event.target?.closest?.('[data-composer-input]')
+        if (!input?.isContentEditable || event.target?.closest?.('[contenteditable=false]')) return
+        // An open/loading menu without a highlight passes Enter through to submit.
+        // DSH's trigger listbox marks the highlighted row with aria-selected.
+        const visible = node => node && !node.closest?.('[hidden],[inert],[aria-hidden=true]') && node.getClientRects?.().length
+        const activeId = input.getAttribute?.('aria-activedescendant')
+        if (activeId && visible(this.document?.getElementById?.(activeId))) return
+        const selected = this.document?.querySelectorAll?.('[data-trigger-menu] [role=option][aria-selected=true],[data-composer-overlay] [role=listbox] [role=option][aria-selected=true],[data-menu-material] [role=option][aria-selected=true]') ?? []
+        if ([...selected].some(visible)) return
+        // Repeated Enter also stays an editing gesture, never a delayed send.
+        event.stopImmediatePropagation()
+      }
+      this.onComposerCompositionEnd = event => {
+        if (!this.state.active || typeof event.data !== 'string' || !event.data.endsWith('\n')) return
+        const input = event.target?.closest?.('[data-composer-input]')
+        if (!input?.isContentEditable || event.target?.closest?.('[contenteditable=false]')) return
+        // Lexical reads this instance's data at the root (or caches it on Safari).
+        // Preserve normal IME finalization, but never dispatch KEY_ENTER_COMMAND(null).
+        Object.defineProperty(event, 'data', { value: event.data.slice(0, -1), configurable: true })
+        const generation = this.enterGeneration
+        queueMicrotask(() => {
+          if (this.closed || !this.state.active || generation !== this.enterGeneration || !input.isConnected || this.document?.activeElement !== input) return
+          // beforeinput goes directly to Lexical's paragraph command, not its send keymap.
+          input.dispatchEvent(new this.view.InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true }))
+        })
+      }
       this.onFocusIn = () => this.measure()
       this.document?.addEventListener?.('focusin', this.onFocusIn, true)
       this.document?.addEventListener?.('focusout', this.onFocusIn, true)
@@ -296,6 +325,12 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       this.root?.toggleAttribute?.('data-dsh-touch', this.touch)
       const changed = mode !== this.state.mode || active !== this.state.active
       if (changed) this.state = { mode, active }
+      if (active !== !!this.enterListening) {
+        this.document?.[active ? 'addEventListener' : 'removeEventListener']?.('keydown', this.onComposerEnter, true)
+        this.document?.[active ? 'addEventListener' : 'removeEventListener']?.('compositionend', this.onComposerCompositionEnd, true)
+        this.enterGeneration = (this.enterGeneration ?? 0) + 1
+        this.enterListening = active
+      }
       this.measure(); this.syncToolbar()
       if (!changed) return
       if (!active) this.chrome.set({ open: null })
@@ -309,7 +344,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         style.removeProperty('--dsh-pwa-viewport'); style.removeProperty('--dsh-pwa-shift')
         this.root.removeAttribute?.('data-dsh-mobile-keyboard')
         this.root.removeAttribute?.('data-dsh-pwa-compact'); this.keyboard = false
-        this.viewportBaseline = null
+        this.viewportBaseline = null; this.viewportSize = null; this.viewportShift = null
         return
       }
       // Pinch zoom also moves the visual viewport; keep the last unzoomed frame.
@@ -326,11 +361,21 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       this.viewportBaseline = { width, height: reference }
       const keyboard = (typeof windowHeight === 'number' && windowHeight - height > KEYBOARD_MIN)
         || (editable && reference - height > KEYBOARD_MIN)
-      style.setProperty('--dsh-pwa-viewport', `${height}px`)
-      // iOS pans the visual viewport over the page when the keyboard opens. Move the
-      // app with it, or the shortened app stays at the top and the visible area is blank.
-      if (top) style.setProperty('--dsh-pwa-shift', `translateY(${top}px)`)
-      else style.removeProperty('--dsh-pwa-shift')
+      // Ignore 1–3px viewport noise relative to the last committed size, not the
+      // last event. Keyboard transitions and width changes must still land at once.
+      const size = this.viewportSize
+      if (!size || keyboard !== this.keyboard || width !== size.width || Math.abs(height - size.height) >= VIEWPORT_MIN_CHANGE) {
+        style.setProperty('--dsh-pwa-viewport', `${height}px`)
+        this.viewportSize = { width, height }
+      }
+      // Only keyboard panning needs compensation. Standalone overscroll can report
+      // a small offset without a keyboard; translating the app would amplify it.
+      const shift = keyboard && top ? `translateY(${top}px)` : ''
+      if (shift !== this.viewportShift) {
+        if (shift) style.setProperty('--dsh-pwa-shift', shift)
+        else style.removeProperty('--dsh-pwa-shift')
+        this.viewportShift = shift
+      }
       this.keyboard = keyboard
       this.root.toggleAttribute?.('data-dsh-mobile-keyboard', keyboard)
       this.root.toggleAttribute?.('data-dsh-pwa-compact', height <= 260 && width >= Math.max(480, height * 2))
@@ -362,9 +407,13 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     }
     dispose() {
       this.closed = true
+      this.document?.removeEventListener?.('keydown', this.onComposerEnter, true)
+      this.document?.removeEventListener?.('compositionend', this.onComposerCompositionEnd, true)
+      this.enterGeneration = (this.enterGeneration ?? 0) + 1
+      this.enterListening = false
       this.document?.removeEventListener?.('focusin', this.onFocusIn, true)
       this.document?.removeEventListener?.('focusout', this.onFocusIn, true)
-      this.viewportBaseline = null
+      this.viewportBaseline = null; this.viewportSize = null; this.viewportShift = null
       this.touchQuery?.removeEventListener?.('change', this.onChange)
       this.viewport?.removeEventListener?.('resize', this.onViewport)
       this.viewport?.removeEventListener?.('scroll', this.onViewport)
@@ -382,7 +431,10 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
   const SAFE_L = 'env(safe-area-inset-left,0px)', SAFE_R = 'env(safe-area-inset-right,0px)', SAFE_B = 'env(safe-area-inset-bottom,0px)'
   const mobileCss = `
     ${T},${T} body,${M},${M} body{overscroll-behavior:none}
-    ${T} [data-conversation-scroll]{overscroll-behavior-y:contain}
+    ${T} [data-conversation-scroll]{overscroll-behavior-y:none}
+    /* One native scrollport on touch: nested process caps latch gestures at their
+       edges and leave the conversation's follow intent unchanged while reading. */
+    ${T} [data-step-process-body]{max-height:none;overflow:visible;mask-image:none}
     /* Workspace/session actions otherwise require hover. A touch row tap opens
        the session (and dismisses the mobile drawer), so it cannot reveal them. */
     ${T} [data-slot=sidebar] [data-row-key]>span:has(button){display:flex!important}
@@ -430,7 +482,6 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} [data-slot="sidebar.workspaces"]>div>div:has(input)>div:has(button[aria-expanded="true"]){min-width:0;max-width:100%}
     ${M} [data-slot="sidebar.workspaces"]>div>div:has(input):has(button[aria-expanded="false"])>div:has(button):not(:has(input)){max-width:92px}
     ${M} [data-slot=sidebar] div:has(>button[aria-expanded]):has(>input){height:44px}
-    ${M} [role=menu] [role=menuitem]{min-height:44px;box-sizing:border-box}
     ${M} ${FRAME}>[data-rightbar-col]{grid-column:3;grid-row:1}
     ${M} [data-sidebar-right-panel]{width:100vw!important;max-width:100vw!important;--dsh-sidebar-width:100vw!important;box-sizing:border-box;padding:0 ${SAFE_R} ${SAFE_B} ${SAFE_L}}
     ${M} ${FRAME}>div[data-side]{display:none!important}
@@ -444,19 +495,23 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     }
     ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
     ${M}[data-dsh-mobile-keyboard] [data-composer-seat]{padding-bottom:0}
-    ${M} [data-composer-input],${M} input,${M} textarea,${M} select{font-size:max(16px,1em)}
+    /* Touch includes stock-layout iPads and body portals. Important defeats host
+       search-field selectors/inline sizes without depending on hashed classes. */
+    :is(${M},${T}) input,:is(${M},${T}) textarea,:is(${M},${T}) select,:is(${M},${T}) [contenteditable]:not([contenteditable=false]){font-size:max(16px,1em)!important}
     /* Composer controls keep a finger-sized target on touch screens, including
        tablets using the stock layout. Inline editor chips keep their own size. */
-    ${T} [data-composer-card] button:not([contenteditable] button):not([data-slot="conversation.input.attachments"] button),${T} [data-composer-seat] button[aria-haspopup=dialog]{min-width:44px;min-height:44px}
-    ${T} [id^=dsh-slash-option-]{min-height:44px}
+    ${T} [data-composer-card] button:not([contenteditable] button):not([data-composer-overlay] button):not([data-slot="conversation.input.attachments"] button),${T} [data-composer-seat] button[aria-haspopup=dialog]{min-width:44px;min-height:44px}
     ${M}[data-dsh-mobile-keyboard] [data-composer-dock]{display:none}
     /* The stock 336px editor cap can exceed the whole keyboard-reduced phone
        viewport. Reserve the header, action row and statistics before growing. */
     ${T} [data-input-scroll]{max-height:min(336px,max(36px,calc(var(--dsh-pwa-viewport,100dvh) - 260px)))}
-    /* /model and /permission use an inline filtered picker, not the portalled
-       toolbar menus. On phones it needs a visible-viewport surface of its own. */
-    ${M} [data-composer-seat]:has([data-composer-overlay] [data-menu-material]>input){z-index:25}
-    ${M} [data-composer-overlay] [data-menu-material]:has(>input){position:fixed!important;left:12px;right:12px;top:calc(var(--dsh-pwa-top,0px) + 80px);bottom:auto;width:auto;max-width:calc(100vw - 24px);max-height:calc(var(--dsh-pwa-viewport,100dvh) - var(--dsh-pwa-top,0px) - 96px)!important}
+    /* Preserve DSH's anchored width, placement and dense menu rows. Raising the
+       seat fixes inline pickers behind the header without detaching the popup. */
+    :is(${M},${T}) [data-composer-seat]:has([data-composer-overlay] [data-menu-material]){z-index:25}
+    /* Only constrained viewports replace the host's 84px top-margin estimate.
+       The measured room follows the real overlay anchor; no fixed/full-width seat. */
+    :is(${M},${T}):is([data-dsh-mobile-keyboard],[data-dsh-pwa-compact]) [data-composer-overlay] [data-menu-material]{max-height:min(320px,var(--dsh-pwa-menu-room,320px))!important;translate:0 var(--dsh-pwa-menu-shift,0px)}
+    :is(${M},${T}):is([data-dsh-mobile-keyboard],[data-dsh-pwa-compact]) [data-composer-overlay] [data-trigger-menu]{max-height:min(400px,var(--dsh-pwa-menu-room,400px))!important}
 
     /* Stock tablet tables hide native x overflow; keep vertical scroll chaining. */
     :is(${M},${T}) .md-table-wide{overflow-x:auto!important;padding-bottom:0!important;overscroll-behavior-x:contain}
@@ -500,15 +555,6 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     :is(${T},${M})[data-dsh-pwa-compact] [data-composer-card]{flex-direction:row;align-items:center;padding:4px;gap:4px}
     :is(${T},${M})[data-dsh-pwa-compact] [data-input-scroll]{flex:1;min-width:0;max-height:44px;margin:0}
     :is(${T},${M})[data-dsh-pwa-compact] [data-composer-card]>div:last-child{flex:0 1 340px;width:44vw;max-width:48%;flex-wrap:nowrap;gap:4px;padding:0}
-    /* A compact viewport has no room for the normal toolbar + 80px offset.
-       Give the inline picker the visible surface while it covers the composer. */
-    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-overlay] [data-menu-material]:has(>input){position:fixed!important;left:12px;right:12px;bottom:auto;width:auto;top:4px;max-height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important}
-    /* Trigger suggestions (the + and / lists) are a different surface from
-       filtered pickers. Their anchored viewport can collapse to zero in compact
-       mode; use the visible viewport and let the option list scroll internally. */
-    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-seat]:has([data-trigger-menu]){z-index:25}
-    :is(${T},${M})[data-dsh-pwa-compact] [data-composer-overlay] [data-trigger-menu]{position:fixed!important;left:12px!important;right:12px!important;top:4px!important;bottom:auto!important;width:auto!important;max-width:calc(100vw - 24px);height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important;max-height:calc(var(--dsh-pwa-viewport,100dvh) - 8px)!important;display:flex;flex-direction:column;overflow:hidden;z-index:40}
-    :is(${T},${M})[data-dsh-pwa-compact] [data-trigger-menu] [role=listbox]{flex:1 1 auto;height:auto!important;min-height:0;max-height:none!important;overflow-y:auto}
     .dsh-pwa-toolbar{position:fixed;top:0;left:0;right:0;height:var(--dsh-pwa-top);padding:env(safe-area-inset-top,0px) max(8px,${SAFE_R}) 0 max(8px,${SAFE_L});box-sizing:border-box;display:flex;align-items:center;gap:10px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border-bottom:.5px solid var(--dsw-alias-border-l3);pointer-events:auto}
     .dsh-pwa-toolbar strong{font-size:14px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .dsh-pwa-menu{border:0;padding:0;width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:var(--dsw-alias-label-primary);background:transparent;cursor:pointer;flex:none;-webkit-app-region:no-drag}
@@ -911,10 +957,71 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       h(MobileUI, { mobile, locale }),
       controller && h(UpdateUI, { controller, locale }))
   }
+  // The host estimates room above inline menus with an 84px desktop header.
+  // Measure only composer geometry, never streaming conversation content.
+  function mountComposerMenuBounds() {
+    const root = document.documentElement, seats = new Set(), overlays = new Set()
+    let frame, disposed = false, constrained = false
+    const clear = () => {
+      cancelAnimationFrame(frame); frame = null; seatWatch.disconnect(); resize.disconnect(); seats.clear()
+      for (const overlay of overlays) { overlay.style.removeProperty('--dsh-pwa-menu-room'); overlay.style.removeProperty('--dsh-pwa-menu-shift') }
+      overlays.clear()
+    }
+    const measure = () => {
+      frame = null
+      if (disposed || !constrained) return
+      const viewportTop = visualViewport?.offsetTop ?? 0
+      for (const seat of seats) {
+        if (!seat.isConnected) continue
+        const header = seat.closest('[data-slot=main]')?.querySelector('[data-slot="conversation.header"] header')
+        const top = Math.max(viewportTop + 4, (header?.getBoundingClientRect().bottom ?? viewportTop) + 4)
+        for (const overlay of seat.querySelectorAll('[data-composer-overlay]')) {
+          overlays.add(overlay)
+          const bottom = overlay.getBoundingClientRect().top - 4
+          let room = Math.max(0, Math.floor(bottom - top)), shift = 0
+          // A search field plus one row needs about 88px. Only tiny landscape
+          // may borrow the composer area below its anchor; keep the header and
+          // keyboard clear instead of placing the search field behind chrome.
+          if (room < 88 && root.hasAttribute('data-dsh-pwa-compact')) {
+            room = Math.max(0, Math.floor(viewportTop + (visualViewport?.height ?? 0) - top - 4))
+            shift = Math.max(0, top + room - bottom)
+          }
+          for (const [name, value] of [['--dsh-pwa-menu-room', `${room}px`], ['--dsh-pwa-menu-shift', `${shift}px`]]) if (overlay.style.getPropertyValue(name) !== value) overlay.style.setProperty(name, value)
+        }
+      }
+    }
+    const schedule = () => { if (!disposed && constrained && frame == null) frame = requestAnimationFrame(measure) }
+    const resize = new ResizeObserver(schedule), seatWatch = new MutationObserver(schedule)
+    // No body/conversation subtree observer: ordinary rendering and streaming
+    // must not wake this guard. Rediscover seats only on viewport/mode changes.
+    const sync = () => {
+      if (disposed) return
+      constrained = root.matches(':is([data-dsh-touch],[data-dsh-mobile]):is([data-dsh-mobile-keyboard],[data-dsh-pwa-compact])')
+      if (!constrained) { clear(); return }
+      const next = new Set(document.querySelectorAll('[data-composer-seat]'))
+      if (next.size !== seats.size || [...next].some(seat => !seats.has(seat))) {
+        clear()
+        for (const seat of next) {
+          seats.add(seat); seatWatch.observe(seat, { childList: true, subtree: true }); resize.observe(seat)
+          for (const card of seat.querySelectorAll('[data-composer-card]')) resize.observe(card)
+        }
+      }
+      schedule()
+    }
+    const watch = new MutationObserver(sync)
+    watch.observe(root, { attributes: true, attributeFilter: ['data-dsh-mobile-keyboard', 'data-dsh-pwa-compact', 'data-dsh-mobile', 'data-dsh-touch'] })
+    visualViewport?.addEventListener('resize', sync); visualViewport?.addEventListener('scroll', sync)
+    sync()
+    return () => {
+      disposed = true; watch.disconnect(); clear()
+      visualViewport?.removeEventListener('resize', sync); visualViewport?.removeEventListener('scroll', sync)
+    }
+  }
   function apply(ctx) {
     if (!ctx.slots?.inject || !ctx.locale?.register) return
     const mobile = new MobileController(), install = new InstallController()
     ctx.effect(() => mountPwaHead())
+    ctx.effect(() => mountComposerMenuBounds())
     const controller = ctx.connection?.rpc ? new UpdateController(ctx.connection) : null
     ctx.effect(() => () => { mobile.dispose(); install.dispose(); controller?.dispose() })
     ctx.effect(() => ctx.locale.register(NS, copy))
@@ -945,5 +1052,5 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       return () => { unsubscribe(); dispose?.() }
     })
   }
-  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileChrome, MobileUI, SettingsUI, InstallController, mountPwaHead, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
+  return { name: 'dsh-pwa', inject: ['slots', 'locale', 'connection'], apply, UpdateController, UpdateUI, MobileController, MobileChrome, MobileUI, SettingsUI, InstallController, mountPwaHead, mountComposerMenuBounds, copy, drawerShouldClose, drawerDialogKeepsDrawer, notesForLocale, releaseNoteBlocks, inlineParts, ReleaseNotes, openedDialog, showUpdateStage }
 } })

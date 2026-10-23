@@ -93,7 +93,7 @@ try {
     }, world)
     await page.waitForFunction(id => document.querySelector('[data-conversation-session]')?.dataset.conversationSession === id, id)
     const input = page.locator('[data-composer-input]')
-    await input.click(); await page.keyboard.type('Write a long answer.'); await page.keyboard.press('Enter')
+    await input.click(); await page.keyboard.type('Write a long answer.'); await page.getByRole('button', { name: 'Send message', exact: true }).click()
     await page.getByText('Section 60', { exact: true }).waitFor({ timeout: 60000 })
     await page.waitForTimeout(500)
     const scroll = page.locator('[data-conversation-scroll]')
@@ -107,7 +107,7 @@ try {
         overflow: sc.scrollHeight - sc.clientHeight,
       }
     })
-    assert.equal(styles.html, 'none'); assert.equal(styles.body, 'none'); assert.equal(styles.scroller, 'contain')
+    assert.equal(styles.html, 'none'); assert.equal(styles.body, 'none'); assert.equal(styles.scroller, 'none')
     assert.equal(styles.touch, 'manipulation')
     assert.ok(styles.page <= 0, `${device.name}: the document itself does not scroll (${styles.page}px)`)
     assert.ok(styles.overflow > device.height, `${device.name}: the conversation is long enough to scroll`)
@@ -144,7 +144,7 @@ try {
     await page.screenshot({ path: join(world, `touch-${device.name}.png`) })
     await cdp.detach()
     assert.equal(errors.length, 0, errors.join('\n'))
-    console.log(`${device.name} ${device.width}x${device.height}: touch scope, page overscroll none, conversation contain, swipe ${atEnd.chat}→${up.chat}→${down.chat}, page scroll 0`)
+    console.log(`${device.name} ${device.width}x${device.height}: touch scope, page overscroll none, conversation overscroll none, swipe ${atEnd.chat}→${up.chat}→${down.chat}, page scroll 0`)
     await context.close()
   }
   console.log(`Touch scroll check passed; evidence ${world}`)
