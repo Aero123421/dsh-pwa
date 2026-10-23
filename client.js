@@ -490,7 +490,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     :is(${M},${T}) :is(.dsh-pwa-actions button,.dsh-pwa-segment button){min-width:44px;min-height:44px}
     /* Off keeps the desktop settings columns, even on a narrow touch screen.
        Collapse segment tracks before their 44px buttons can overlap. */
-    ${T} .dsh-pwa-segment{grid-template-columns:repeat(auto-fit,minmax(44px,1fr))}
+    ${T} .dsh-pwa-segment{min-width:0;grid-template-columns:repeat(auto-fit,minmax(44px,1fr))}
     ${T} .dsh-pwa-link{display:flex;align-items:center;min-height:44px;max-width:100%}
     /* Emergency landscape layout: keep navigation and every composer action,
        but defer tabs/statistics until the keyboard closes. No document scrolling. */
