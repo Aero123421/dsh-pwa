@@ -99,7 +99,7 @@ function root() { const attrs = new Set(); return { attrs, toggleAttribute: (nam
 test('mobile layout defaults to auto and follows the narrow-screen query', async () => {
   const { MobileController } = await clientExports()
   const narrow = media(false), html = root(), seen = []
-  const mobile = new MobileController({ storage: storage(), matchMedia: () => narrow.query, root: html })
+  const mobile = new MobileController({ storage: storage(), matchMedia: q => q.includes('any-pointer') ? media(false).query : narrow.query, root: html })
   mobile.subscribe(() => seen.push(mobile.getSnapshot().active))
   assert.deepEqual({ ...mobile.getSnapshot() }, { mode: 'auto', active: false }); assert.equal(html.attrs.has('data-dsh-mobile'), false)
   narrow.set(true); assert.equal(html.attrs.has('data-dsh-mobile'), true)
@@ -110,15 +110,15 @@ test('mobile layout defaults to auto and follows the narrow-screen query', async
 test('mobile layout choice is saved per browser and ignores unknown modes', async () => {
   const { MobileController } = await clientExports()
   const saved = storage(), narrow = media(true), html = root()
-  const first = new MobileController({ storage: saved, matchMedia: () => narrow.query, root: html })
+  const first = new MobileController({ storage: saved, matchMedia: q => q.includes('any-pointer') ? media(false).query : narrow.query, root: html })
   first.setMode('off'); assert.equal(saved.getItem('dsh-pwa:mobile-ui'), 'off'); assert.equal(html.attrs.has('data-dsh-mobile'), false)
   first.setMode('sideways'); assert.equal(first.getSnapshot().mode, 'off'); first.dispose()
   const desktop = media(false)
-  const second = new MobileController({ storage: saved, matchMedia: () => desktop.query, root: html })
+  const second = new MobileController({ storage: saved, matchMedia: q => q.includes('any-pointer') ? media(false).query : desktop.query, root: html })
   assert.equal(second.getSnapshot().mode, 'off'); second.setMode('on')
   assert.deepEqual({ ...second.getSnapshot() }, { mode: 'on', active: true }); assert.equal(html.attrs.has('data-dsh-mobile'), true)
   saved.setItem('dsh-pwa:mobile-ui', 'bogus'); second.dispose()
-  const fallback = new MobileController({ storage: saved, matchMedia: () => desktop.query, root: html })
+  const fallback = new MobileController({ storage: saved, matchMedia: q => q.includes('any-pointer') ? media(false).query : desktop.query, root: html })
   assert.equal(fallback.getSnapshot().mode, 'auto'); fallback.dispose()
 })
 
@@ -144,7 +144,7 @@ function visualViewport(values) {
 test('auto mode also covers phones in landscape', async () => {
   const { MobileController } = await clientExports()
   let query
-  const mobile = new MobileController({ storage: storage(), matchMedia: value => { query = value; return media(false).query }, root: root(), viewport: null })
+  const mobile = new MobileController({ storage: storage(), matchMedia: value => { if (!value.includes('any-pointer')) query = value; return media(false).query }, root: root(), viewport: null })
   assert.match(query, /max-width: 767px/); assert.match(query, /max-height: 500px\) and \(pointer: coarse\)/)
   mobile.dispose()
 })
@@ -152,7 +152,7 @@ test('auto mode also covers phones in landscape', async () => {
 test('mobile layout follows the visual viewport when an on-screen keyboard opens', async () => {
   const { MobileController } = await clientExports()
   const html = styledRoot(), viewport = visualViewport({ height: 844, offsetTop: 0, scale: 1 })
-  const mobile = new MobileController({ storage: storage(), matchMedia: () => media(true).query, root: html, viewport, view: { innerHeight: 844 } })
+  const mobile = new MobileController({ storage: storage(), matchMedia: q => media(!q.includes('any-pointer')).query, root: html, viewport, view: { innerHeight: 844 } })
   assert.equal(html.props.get('--dsh-pwa-viewport'), '844px'); assert.equal(html.props.has('--dsh-pwa-shift'), false)
   assert.equal(html.attrs.has('data-dsh-mobile-keyboard'), false)
   // iOS keeps the window height and pans the shorter visual viewport down.
@@ -175,7 +175,7 @@ test('a successful update hides the stage name and a settings dialog is recogniz
   assert.equal(showUpdateStage({ status: 'applied', result: { stage: 'enable' } }), false)
   assert.equal(showUpdateStage({ status: 'failed', result: { stage: 'enable' } }), true)
   assert.equal(showUpdateStage({ status: 'applied' }), false)
-  assert.equal(source.includes('scrollIntoView'), false)
+  assert.match(source, /revealModalInput/)
   assert.equal(source.includes('position:sticky'), false)
   const probe = present => ({ nodeType: 1, matches: () => false, querySelector: selector => present(selector) ? {} : null })
   assert.equal(openedDialog(probe(selector => selector.includes('[role=dialog][aria-modal="true"]'))), true)
@@ -234,7 +234,7 @@ test('the plugin registers its dictionary and does not define ja', async () => {
 test('a conversation header menu replaces the fallback toolbar only while mounted', async () => {
   const { MobileController } = await clientExports()
   const html = styledRoot()
-  const mobile = new MobileController({ storage: storage(), matchMedia: () => media(true).query, root: html, viewport: null })
+  const mobile = new MobileController({ storage: storage(), matchMedia: q => media(!q.includes('any-pointer')).query, root: html, viewport: null })
   assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), true)
   const toolbar = mobile.claimMenu({}, false)
   assert.equal(mobile.chrome.get().inline, 0); assert.equal(html.attrs.has('data-dsh-mobile-toolbar'), true)
