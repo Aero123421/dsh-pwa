@@ -5,7 +5,7 @@
 import { readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { PluginUpdates } from './updates.js'
+import { PluginUpdates, unmetDshRequirements } from './updates.js'
 
 export const name = 'dsh-pwa'
 export const inject = ['webServer']
@@ -65,12 +65,27 @@ export function normalizePwaHead(html) {
 export function apply(ctx, _config, options = {}) {
   // Updater ownership stays at the plugin root; optional connection routes may be remounted.
   const profile = ctx.get?.('profileContext')
+  // Delegate the boot-time compatibility decision to the published app-boot evaluator
+  // once its module is loaded for the runtime version; updates.js keeps the same rule
+  // as the fallback when app-boot exports no evaluator.
+  let evaluatePublished
+  const appBoot = async () => {
+    const moduleName = '@deepseek-ai/dsh-app-boot'
+    const resolved = profile?.installAnchor ? pathToFileURL(createRequire(profile.installAnchor).resolve(moduleName)).href : moduleName
+    const boot = await import(resolved)
+    if (typeof boot.evaluatePluginCompatibility === 'function') evaluatePublished = boot.evaluatePluginCompatibility
+    return boot
+  }
   const updates = new PluginUpdates({
     manager: () => ctx.get?.('pluginManager'), profileDir: profile?.dir,
-    runtimeVersion: async () => {
-      const moduleName = '@deepseek-ai/dsh-app-boot'
-      const resolved = profile?.installAnchor ? pathToFileURL(createRequire(profile.installAnchor).resolve(moduleName)).href : moduleName
-      return (await import(resolved)).getDshRuntimeVersion()
+    runtimeVersion: async () => (await appBoot()).getDshRuntimeVersion(),
+    evaluateDsh(packageJson, runtime) {
+      if (!evaluatePublished) return unmetDshRequirements(packageJson, runtime)
+      try {
+        const issue = evaluatePublished(packageJson, {}, runtime)
+        // Host-granted exemptions are not published here, so an exempted mismatch stays manual.
+        return issue && issue.exempted !== true ? issue.requirements : {}
+      } catch { throw new Error('metadata') }
     },
     ...options.updates,
   })

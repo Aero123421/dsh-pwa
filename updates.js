@@ -120,25 +120,58 @@ export function releaseCandidate(release, current) {
 }
 const WORKSPACE_PEER = new Set(['workspace:^', 'workspace:~', 'workspace:*'])
 
-/** Same peer rule as DSH app-boot: prereleases match, and workspace:^, workspace:~, and workspace:* mean the running version. */
-function dshPeerMatches(runtime, range) {
-  const requirement = WORKSPACE_PEER.has(range) ? runtime : range
-  if (typeof requirement !== 'string' || requirement.trim() === '') return false
-  try { return semver.satisfies(runtime, requirement, { includePrerelease: true }) }
-  catch { return false }
+/** Same satisfies as DSH app-boot: a blank or unparsable range never matches, and prereleases participate. */
+function dshSatisfies(runtime, range) {
+  return range.trim() !== '' && semver.satisfies(runtime, range, { includePrerelease: true })
+}
+
+function objectField(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('metadata')
+  return value
 }
 
 /**
- * Accept a candidate whose @deepseek-ai/dsh* peers the running DSH satisfies.
- * A release with no such peer, or a non-string range, stays manual.
- * An unsatisfied or unparsable range is incompatible: DSH would skip that bundle at boot.
+ * Unmet dsh requirements under the official app-boot rule (plugin-compatibility.ts):
+ * an own engines.dsh range decides alone and peerDependencies are ignored;
+ * otherwise every @deepseek-ai/dsh or @deepseek-ai/dsh-* peer must match.
+ * For peers only, workspace:^, workspace:~, and workspace:* mean the running version;
+ * any other blank or invalid range, including a workspace: engines.dsh, is unmet.
+ * A manifest without any dsh requirement is compatible, exactly as app-boot loads it without a warning.
+ * A malformed engines or peer field throws: the candidate states no readable rule.
  */
-export function checkCompatibility(packageJson, candidate, runtime) {
+export function unmetDshRequirements(packageJson, runtime) {
+  if (typeof packageJson !== 'object' || packageJson === null || Array.isArray(packageJson)) throw new Error('metadata')
+  const engines = Object.hasOwn(packageJson, 'engines') ? objectField(packageJson.engines) : {}
+  if (Object.hasOwn(engines, 'dsh')) {
+    if (typeof engines.dsh !== 'string') throw new Error('metadata')
+    return dshSatisfies(runtime, engines.dsh) ? {} : { 'engines.dsh': engines.dsh }
+  }
+  if (!Object.hasOwn(packageJson, 'peerDependencies')) return {}
+  const unmet = {}
+  for (const [name, range] of Object.entries(objectField(packageJson.peerDependencies))) {
+    if (typeof range !== 'string') throw new Error('metadata')
+    if (name !== '@deepseek-ai/dsh' && !name.startsWith('@deepseek-ai/dsh-')) continue
+    if (!dshSatisfies(runtime, WORKSPACE_PEER.has(range) ? runtime : range)) unmet[name] = range
+  }
+  return unmet
+}
+
+/**
+ * Accept a candidate the running DSH would load at boot, under the app-boot rule:
+ * engines.dsh decides alone, only without it do dsh peers decide, and a manifest
+ * without any dsh requirement stays loadable. evaluate defaults to that rule and
+ * the host can substitute its published evaluator. An unmet requirement throws
+ * incompatible and names the ranges the running DSH does not satisfy.
+ */
+export function checkCompatibility(packageJson, candidate, runtime, evaluate = unmetDshRequirements) {
   semanticVersion(runtime)
   if (!packageJson || packageJson.name !== PACKAGE || packageJson.version !== candidate.version || typeof packageJson.dsh?.bundle?.patch !== 'string') throw new Error('metadata')
-  const peers = Object.entries(packageJson.peerDependencies ?? {}).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'))
-  if (!peers.length || peers.some(([, range]) => typeof range !== 'string')) throw new Error('compatibility-unknown')
-  for (const [, range] of peers) if (!dshPeerMatches(runtime, range)) throw new Error('incompatible')
+  const unmet = evaluate(packageJson, runtime)
+  if (Object.keys(unmet).length > 0) {
+    const error = new Error('incompatible')
+    error.requirements = unmet
+    throw error
+  }
   return runtime
 }
 
@@ -258,8 +291,8 @@ export function resultState(result, expected, runtime, installed) {
 
 /** Optional manager is resolved for every operation; static PWA routes never depend on it. */
 export class PluginUpdates {
-  constructor({ manager, profileDir, runtimeVersion, isBusy = () => false, fetcher = fetch, version = manifest.version }) {
-    Object.assign(this, { manager, profileDir, runtimeVersion, isBusy, fetcher, version })
+  constructor({ manager, profileDir, runtimeVersion, isBusy = () => false, fetcher = fetch, version = manifest.version, evaluateDsh = unmetDshRequirements }) {
+    Object.assign(this, { manager, profileDir, runtimeVersion, isBusy, fetcher, version, evaluateDsh })
     this.candidate = null; this.checking = null; this.running = null; this.closed = false; this.abort = new AbortController()
   }
   get cacheDir() { return this.profileDir && join(this.profileDir, '.dsh-pwa-updates') }
@@ -297,7 +330,7 @@ export class PluginUpdates {
     const candidate = releaseCandidate(release, current)
     if (!candidate) return null
     const packageJson = JSON.parse((await boundedFetch(`https://raw.githubusercontent.com/${REPOSITORY}/${candidate.tag}/package.json`, 64 * 1024, options)).toString())
-    candidate.compatibility = checkCompatibility(packageJson, candidate, await this.runtimeVersion())
+    candidate.compatibility = checkCompatibility(packageJson, candidate, await this.runtimeVersion(), this.evaluateDsh)
     const files = ['index.js', 'updates.js', 'client.js', 'cordis.patch.yml']
     if (packageJson.main !== './index.js' || packageJson.exports?.['./client'] !== './client.js' || !Array.isArray(packageJson.files) || files.some(file => !packageJson.files.includes(file)) || !packageJson.files.includes('assets/*.png')) throw new Error('metadata')
     for (const file of files) {
@@ -320,7 +353,11 @@ export class PluginUpdates {
         if (last && ['installing', 'unknown', 'restart-required'].includes((await this.reconcile(last)).status)) throw new Error('busy')
         this.candidate = await this.getCandidate(bundle.version ?? this.version)
         return { ...this.base(), installedVersion: bundle.version, status: this.candidate ? 'available' : viewStatus(bundle.version, this.version) === 'restart-required' ? 'restart-required' : bundle.version === this.version ? 'current' : 'idle', candidate: this.candidate && this.publicCandidate(this.candidate), checkedAt: new Date().toISOString() }
-      } catch (error) { this.candidate = null; return { ...this.base(), status: error.message === 'release-unavailable' ? 'no-release' : 'blocked', reason: reasonOf(error) } }
+      } catch (error) {
+        this.candidate = null
+        // Unmet ranges stay visible before any update so the needed DSH version is stated, not just the refusal.
+        return { ...this.base(), status: error.message === 'release-unavailable' ? 'no-release' : 'blocked', reason: reasonOf(error), ...(error.requirements ? { dshRequirements: error.requirements } : {}) }
+      }
     })().finally(() => { this.checking = null })
     return this.checking
   }

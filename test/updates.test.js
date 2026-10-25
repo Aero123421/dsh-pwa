@@ -47,10 +47,53 @@ test('release schema, stable channel and compatibility are fail closed without r
   assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-app-boot': '>=0.2.1-alpha.2 <0.3.0-0' } }, candidate, '0.3.0-alpha.1'), /incompatible/)
   assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh-llm': 'not-a-range' } }, candidate, '0.2.1-alpha.3'), /incompatible/)
   assert.equal(checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh': 'workspace:^' } }, candidate, '0.2.1-alpha.3'), '0.2.1-alpha.3')
-  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: {} }, candidate, '0.2.1-alpha.3'), /compatibility-unknown/)
+  // No dsh requirement at all is loadable under the app-boot rule, not an unknown.
+  assert.equal(checkCompatibility({ ...pkg, peerDependencies: {} }, candidate, '0.2.1-alpha.3'), '0.2.1-alpha.3')
   for (const value of [{ ...release, prerelease: true }, { ...release, draft: true }, { ...release, assets: 'invalid' }, { ...release, tag_name: 'garbage' }]) assert.throws(() => releaseCandidate(value, '0.2.0'))
   assert.ok(candidate)
   assert.ok(releaseCandidate({ ...release, assets: [] }, '0.2.0'))
+})
+test('engines.dsh decides alone and dsh peers apply only when it is absent, like app-boot', () => {
+  const candidate = releaseCandidate(release, '0.2.0')
+  // The issue fixture: peers accept 0.2.1-rc.2 while an own engines.dsh range rejects it, so app-boot skips the bundle.
+  const both = { ...pkg, engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } }
+  assert.throws(() => checkCompatibility(both, candidate, '0.2.1-rc.2'), /incompatible/)
+  // The reverse: engines accepts 0.2.1-rc.2 while a peer demands newer, and peers stay ignored.
+  const enginesFirst = { ...pkg, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.2 <0.3.0-0' } }
+  assert.equal(checkCompatibility(enginesFirst, candidate, '0.2.1-rc.2'), '0.2.1-rc.2')
+  // An engines-only declaration decides both ways instead of staying compatibility-unknown.
+  assert.equal(checkCompatibility({ ...pkg, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' }, peerDependencies: {} }, candidate, '0.2.1-rc.2'), '0.2.1-rc.2')
+  assert.throws(() => checkCompatibility({ ...pkg, engines: { dsh: '>=0.2.2 <0.3.0-0' } }, candidate, '0.2.1-rc.2'), /incompatible/)
+  // Only engines.dsh takes priority; an engines.node key never does.
+  assert.equal(checkCompatibility({ ...pkg, engines: { node: '>=22' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } }, candidate, '0.2.1-rc.2'), '0.2.1-rc.2')
+  // Prereleases participate in engines.dsh exactly as they do in peers.
+  assert.equal(checkCompatibility({ ...pkg, engines: { dsh: '>=0.2.1-alpha.2 <0.3.0-0' } }, candidate, '0.2.2-alpha.1'), '0.2.2-alpha.1')
+  // Blank, invalid, and workspace engines.dsh ranges are unmet rather than errors; workspace: stays a peer-only rule.
+  for (const range of ['', '   ', 'not-a-range', 'workspace:^']) assert.throws(() => checkCompatibility({ ...pkg, engines: { dsh: range } }, candidate, '0.2.1-rc.2'), /incompatible/)
+  // Malformed engines or peer fields state no readable rule.
+  for (const engines of [{ dsh: 2 }, null, 'x', []]) assert.throws(() => checkCompatibility({ ...pkg, engines }, candidate, '0.2.1-rc.2'), /metadata/)
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: { '@deepseek-ai/dsh': 1 } }, candidate, '0.2.1-rc.2'), /metadata/)
+  assert.throws(() => checkCompatibility({ ...pkg, peerDependencies: null }, candidate, '0.2.1-rc.2'), /metadata/)
+})
+test('an unmet engines.dsh release surfaces the needed range before any install', async t => {
+  const engines = { ...pkg, engines: { dsh: '>=0.2.2 <0.3.0-0' }, peerDependencies: { '@deepseek-ai/dsh': '>=0.2.1-alpha.2 <0.3.0-0' } }
+  const h = await fixture(t, { fetcher: async url => String(url).endsWith('/package.json') ? Response.json(engines) : fetcher(url) })
+  const checked = await h.updater.check()
+  assert.equal(checked.status, 'blocked')
+  assert.equal(checked.reason, 'incompatible')
+  assert.deepEqual(checked.dshRequirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(h.calls.length, 0)
+})
+test('the host-substituted evaluator decides instead of the local rule', async t => {
+  const asked = []
+  const h = await fixture(t, { evaluateDsh: (packageJson, runtime) => { asked.push([runtime, packageJson.name]); return {} } })
+  assert.equal((await h.updater.check()).status, 'available')
+  assert.deepEqual(asked, [['0.2.1-alpha.2', PACKAGE]])
+  const rejected = await fixture(t, { evaluateDsh: () => ({ 'engines.dsh': '>=0.2.2 <0.3.0-0' }) })
+  const checked = await rejected.updater.check()
+  assert.equal(checked.reason, 'incompatible')
+  assert.deepEqual(checked.dshRequirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  assert.equal(rejected.calls.length, 0)
 })
 test('only the original GitHub source family can update; local/registry/tarballs stay manual', () => {
   for (const source of [`github:${REPOSITORY}#v0.2.0`, `git+https://github.com/${REPOSITORY}.git#abc`]) assert.equal(sourceKind(source), 'github')

@@ -946,6 +946,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
       h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
+      // Ranges stay untranslated like the version line: they name the DSH requirement the release states.
+      state.dshRequirements && h('p', { className: 'dsh-pwa-desc' }, Object.entries(state.dshRequirements).map(([field, range]) => `${field} ${range}`).join(' · ')),
       showUpdateStage(state) && h('p', { className: 'dsh-pwa-state' }, state.result.stage),
       state.candidate && h('div', { className: 'dsh-pwa-notes' },
         h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
