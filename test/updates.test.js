@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID, createHash } from 'node:crypto'
 import { PluginUpdates, REPOSITORY, PACKAGE, compareVersions, semanticVersion, releaseCandidate, releaseNotes, checkCompatibility, installBundleUpdating, resultState, sourceKind, boundedFetch } from '../updates.js'
+import { publishedDshRequirements } from '../index.js'
 const version = '0.3.0', tag = `v${version}`
 const filename = `dsh-pwa-${version}.tgz`
 const download = `https://github.com/${REPOSITORY}/releases/download/${tag}/`
@@ -94,6 +95,13 @@ test('the host-substituted evaluator decides instead of the local rule', async t
   assert.equal(checked.reason, 'incompatible')
   assert.deepEqual(checked.dshRequirements, { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
   assert.equal(rejected.calls.length, 0)
+})
+test('index.js maps both published evaluator shapes to the same decision', () => {
+  assert.deepEqual(publishedDshRequirements(undefined), {})
+  assert.deepEqual(publishedDshRequirements({ exempted: true, requirements: { 'engines.dsh': '>=0.2.2' } }), {})
+  assert.deepEqual(publishedDshRequirements({ requirements: { 'engines.dsh': '>=0.2.2 <0.3.0-0' } }), { 'engines.dsh': '>=0.2.2 <0.3.0-0' })
+  // app-boot 0.2.1-alpha.2 named the same unmet ranges `peers`.
+  assert.deepEqual(publishedDshRequirements({ peers: { '@deepseek-ai/dsh': '>=0.2.2 <0.3.0-0' } }), { '@deepseek-ai/dsh': '>=0.2.2 <0.3.0-0' })
 })
 test('only the original GitHub source family can update; local/registry/tarballs stay manual', () => {
   for (const source of [`github:${REPOSITORY}#v0.2.0`, `git+https://github.com/${REPOSITORY}.git#abc`]) assert.equal(sourceKind(source), 'github')

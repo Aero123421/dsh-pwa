@@ -62,6 +62,11 @@ export function normalizePwaHead(html) {
 }
 
 /** Mount routes before the stock SPA static-file fallback. */
+/** Map a published app-boot compatibility result to unmet requirements. app-boot 0.2.1-alpha.2 named them `peers`; rc.2 renamed them to `requirements`. */
+export function publishedDshRequirements(issue) {
+  if (!issue || issue.exempted === true) return {}
+  return issue.requirements ?? issue.peers ?? {}
+}
 export function apply(ctx, _config, options = {}) {
   // Updater ownership stays at the plugin root; optional connection routes may be remounted.
   const profile = ctx.get?.('profileContext')
@@ -82,9 +87,8 @@ export function apply(ctx, _config, options = {}) {
     evaluateDsh(packageJson, runtime) {
       if (!evaluatePublished) return unmetDshRequirements(packageJson, runtime)
       try {
-        const issue = evaluatePublished(packageJson, {}, runtime)
         // Host-granted exemptions are not published here, so an exempted mismatch stays manual.
-        return issue && issue.exempted !== true ? issue.requirements : {}
+        return publishedDshRequirements(evaluatePublished(packageJson, {}, runtime))
       } catch { throw new Error('metadata') }
     },
     ...options.updates,
