@@ -7,10 +7,15 @@ import { webcrypto } from 'node:crypto'
 export async function clientExports() {
   let exports
   runInNewContext(await readFile(new URL('../client.js', import.meta.url), 'utf8'), {
-    window: { __ModuleLoader__: { load: entry => { exports = entry.factory(() => ({})) } } },
+    window: { __ModuleLoader__: { load: entry => { exports = entry.factory(name => name === 'react' ? React : name === '@deepseek-ai/dsh-client-ui-primitives' ? { Button: 'button' } : {}) } } },
     crypto: webcrypto, setTimeout, clearTimeout,
   })
   return exports
+}
+const React = {
+  createElement: (type, props, ...children) => ({ type, props, children: children.length === 1 ? children[0] : children }),
+  useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
+  useEffect() {},
 }
 function storage() { const values = new Map(); return { getItem: key => values.get(key), setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) } }
 
@@ -87,6 +92,42 @@ test('profile change clears old in-memory request before later connection failur
   controller.profileKey = 'A'; controller.requestId = 'old-A'; controller.publish({ status: 'unknown' })
   await controller.load(); assert.equal(controller.requestId, undefined)
   fail = true; await controller.load(); assert.equal(controller.state.status, 'blocked'); controller.dispose()
+})
+
+test('network failures clear compatibility requirements from an older check', async () => {
+  const { UpdateController } = await clientExports()
+  const requirements = { 'engines.dsh': '>=0.2.2 <0.3.0-0' }
+  let fail = false
+  const controller = new UpdateController({ rpc: { call: async () => {
+    if (fail) throw new Error('network')
+    return { ok: true, value: { profileKey: 'p', status: 'blocked', reason: 'incompatible', dshRequirements: requirements } }
+  } } }, storage())
+  await controller.check()
+  assert.deepEqual(controller.state.dshRequirements, requirements)
+  fail = true
+  await controller.check()
+  assert.equal(controller.state.reason, 'network')
+  assert.equal(controller.state.dshRequirements, undefined)
+  controller.publish({ status: 'blocked', reason: 'incompatible', dshRequirements: requirements })
+  await controller.load()
+  assert.equal(controller.state.reason, 'network')
+  assert.equal(controller.state.dshRequirements, undefined)
+  controller.dispose()
+})
+
+test('blocked update UI displays the exact unmet DSH requirement', async () => {
+  const { UpdateUI, copy } = await clientExports()
+  const requirements = { 'engines.dsh': '>=0.2.2 <0.3.0-0' }
+  const controller = {
+    subscribe: () => () => {},
+    getSnapshot: () => ({ runtimeVersion: '0.2.1-rc.2', status: 'blocked', reason: 'incompatible', dshRequirements: requirements }),
+    check() {}, load() {},
+  }
+  const locale = { bind: () => key => copy.en[key] ?? key }
+  const tree = UpdateUI({ controller, locale })
+  const text = value => Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : value == null ? '' : String(value)
+  assert.match(text(tree), /This release does not support the running DSH version\./)
+  assert.match(text(tree), /engines\.dsh >=0\.2\.2 <0\.3\.0-0/)
 })
 
 function media(matches) {

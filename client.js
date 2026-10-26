@@ -204,7 +204,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         }
         this.publish(state)
         if (['preparing', 'installing'].includes(state.status)) this.timer = setTimeout(() => { void this.load() }, 800)
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network' }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network', dshRequirements: undefined }) }
     }
     async check() {
       if (this.closed || ['checking', 'starting', 'preparing', 'installing', 'unknown', 'restart-required'].includes(this.state.status)) return
@@ -213,7 +213,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       try {
         const state = await this.call('check')
         if (generation === this.generation) { this.profileKey = state.profileKey; this.publish(state) }
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'blocked', reason: 'network' }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'blocked', reason: 'network', dshRequirements: undefined }) }
     }
     async begin() {
       if (this.closed || this.state.status !== 'available') return
