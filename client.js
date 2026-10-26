@@ -204,7 +204,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         }
         this.publish(state)
         if (['preparing', 'installing'].includes(state.status)) this.timer = setTimeout(() => { void this.load() }, 800)
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network' }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network', dshRequirements: undefined }) }
     }
     async check() {
       if (this.closed || ['checking', 'starting', 'preparing', 'installing', 'unknown', 'restart-required'].includes(this.state.status)) return
@@ -213,7 +213,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       try {
         const state = await this.call('check')
         if (generation === this.generation) { this.profileKey = state.profileKey; this.publish(state) }
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'blocked', reason: 'network' }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'blocked', reason: 'network', dshRequirements: undefined }) }
     }
     async begin() {
       if (this.closed || this.state.status !== 'available') return
@@ -946,6 +946,8 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
       h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
+      // Ranges stay untranslated like the version line: they name the DSH requirement the release states.
+      state.dshRequirements && h('p', { className: 'dsh-pwa-desc' }, Object.entries(state.dshRequirements).map(([field, range]) => `${field} ${range}`).join(' · ')),
       showUpdateStage(state) && h('p', { className: 'dsh-pwa-state' }, state.result.stage),
       state.candidate && h('div', { className: 'dsh-pwa-notes' },
         h('p', null, `${state.runtimeVersion} → ${state.candidate.version} · DSH ${state.candidate.compatibility}`),
