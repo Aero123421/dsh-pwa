@@ -41,6 +41,18 @@ test('install prompt is user-triggered, one-use and does not equate accepted wit
   install.dispose(); assert.equal(win.events.size, 0)
 })
 
+test('a thrown install prompt is not reported as a manifest failure', async () => {
+  const { InstallController, copy } = await exports(), win = target()
+  const install = new InstallController(win)
+  win.events.get('beforeinstallprompt')({ preventDefault() {}, prompt() { throw new Error('blocked') }, userChoice: Promise.resolve({ outcome: 'accepted' }) })
+  await install.install()
+  assert.equal(install.state.outcome, 'prompt-failed')
+  assert.equal(install.state.check, 'idle')
+  assert.notEqual(copy.en['pwa.prompt-failed'], copy.en['pwa.failed'])
+  assert.equal(copy.ja['pwa.prompt-failed'] !== copy.ja['pwa.failed'], true)
+  install.dispose()
+})
+
 test('insecure origins and iPad desktop user agents get actionable installation state', async () => {
   const { InstallController } = await exports(), win = target()
   win.isSecureContext = false; win.navigator = { platform: 'MacIntel', maxTouchPoints: 5 }
