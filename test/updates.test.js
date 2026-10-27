@@ -210,8 +210,10 @@ test('Release absence, API failure and no newer candidate are distinct; checks c
   const missing = await fixture(t, { fetcher: async () => new Response('', { status: 404 }) })
   assert.equal((await missing.updater.check()).status, 'no-release')
   const unavailable = await fixture(t, { fetcher: async () => new Response('', { status: 500 }) })
-  assert.equal((await unavailable.updater.check()).status, 'blocked')
-  assert.equal((await unavailable.updater.check()).reason, 'network')
+  const failedCheck = await unavailable.updater.check()
+  assert.equal(failedCheck.status, 'unreachable')
+  assert.equal(failedCheck.reason, 'network')
+  assert.notEqual(failedCheck.status, 'blocked')
   const current = await fixture(t)
   current.bundle.version = version
   current.updater.version = version
@@ -678,6 +680,94 @@ test('release notes keep en and ja sections; an unmarked body stays Japanese', a
   assert.equal(cut.notes, long.slice(0, 6000))
   assert.equal(cut.notes.length, 6000)
   assert.equal(cut.notesByLocale.ja, long.slice(0, 6000))
+})
+
+test('a restart-required record does not block checks after a different version is installed', async t => {
+  const { updater, bundle, directory, manager } = await fixture(t)
+  const checked = await updater.check()
+  const id = randomUUID()
+  await updater.begin(checked.candidate.id, id, updater.base().profileKey)
+  await settle(updater)
+  assert.equal((await updater.reconcile(id)).status, 'restart-required')
+  bundle.version = '0.2.0'
+  const reinstalled = new PluginUpdates({ manager: () => manager, profileDir: directory, version: '0.2.0', runtimeVersion: async () => '0.2.1-alpha.2', fetcher })
+  t.after(() => reinstalled.dispose())
+  assert.equal((await reinstalled.reconcile(id)).status, 'idle')
+  const again = await reinstalled.check()
+  assert.equal(again.status, 'available')
+  assert.equal(again.candidate.version, version)
+})
+
+test('disposal during release preparation is interrupted, not a network failure', async t => {
+  const h = await fixture(t)
+  await h.updater.check()
+  const id = randomUUID()
+  h.updater.fetcher = (_url, { signal }) => new Promise((_resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError')); return }
+    signal.addEventListener('abort', () => reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError')), { once: true })
+  })
+  await h.updater.begin('7', id, h.updater.base().profileKey)
+  h.updater.dispose()
+  await settle(h.updater)
+  assert.equal(h.calls.length, 0)
+  const settled = await h.updater.reconcile(id)
+  assert.equal(settled.status, 'failed')
+  assert.equal(settled.reason, 'interrupted')
+})
+
+test('two overlapping begins admit one install', async t => {
+  const h = await fixture(t)
+  let release
+  const gate = new Promise(resolve => { release = resolve })
+  h.manager.installBundle = async (...args) => {
+    h.calls.push(args)
+    await gate
+    h.bundle.version = version
+    return { changed: true, application: 'restart-required', stage: 'install', target: PACKAGE, bundle: PACKAGE, version }
+  }
+  await h.updater.check()
+  const profileKey = h.updater.base().profileKey
+  const first = h.updater.begin('7', randomUUID(), profileKey)
+  const second = h.updater.begin('7', randomUUID(), profileKey)
+  const settled = await Promise.allSettled([first, second])
+  release()
+  await settle(h.updater)
+  assert.equal(settled.filter(item => item.status === 'fulfilled').length, 1)
+  assert.equal(settled.filter(item => item.status === 'rejected').length, 1)
+  assert.match(String(settled.find(item => item.status === 'rejected').reason), /busy/)
+  assert.equal(h.calls.length, 1)
+})
+
+test('a failed, mismatched, or unverified restore is not reported as the previous version', async () => {
+  const previous = { source: `github:${REPOSITORY}`, enabled: true, version: '0.2.0' }
+  const options = { enabled: true, requestId: randomUUID(), saveExact: true }
+  async function run(restore, rowAfter) {
+    let stage = 'first'
+    let installed = true
+    const manager = {
+      listBundles: async () => [{ name: PACKAGE, installed, version: installed ? (rowAfter?.version ?? '0.2.0') : '0.2.0', source: previous.source, ...(installed ? rowAfter : {}) }],
+      removeBundle: async () => { installed = false; return { application: 'applied', changed: true, stage: 'remove', target: PACKAGE } },
+      installBundle: async (spec) => {
+        if (stage === 'first') { stage = 'replace'; return { application: 'failed', changed: false, error: { code: 'already-installed' }, stage: 'install', target: spec } }
+        if (stage === 'replace') { stage = 'restore'; installed = false; return { application: 'failed', changed: false, error: { code: 'operation-error' }, stage: 'install', target: spec, packageResult: { exitCode: 1, timedOut: false } } }
+        installed = rowAfter?.installed !== false
+        if (typeof restore === 'function') return restore(spec)
+        return restore
+      },
+    }
+    return installBundleUpdating(manager, `github:${REPOSITORY}#${tag}`, options, previous)
+  }
+  const failedRow = await run({ application: 'failed', changed: false, error: { code: 'operation-error' }, version: '0.2.0', packageResult: { exitCode: 1, timedOut: false } }, { version: '0.2.0', error: { code: 'operation-error' } })
+  assert.equal(failedRow.restore.application, 'unverified')
+  const otherVersion = await run({ application: 'applied', changed: true, bundle: PACKAGE, version: '0.1.0' }, { version: '0.1.0' })
+  assert.equal(otherVersion.restore.application, 'unverified')
+  const thrown = await run(() => { throw new Error('response lost') }, { version: '0.2.0' })
+  assert.equal(thrown.restore.application, 'unverified')
+  const confirmed = await run({ application: 'applied', changed: true, bundle: PACKAGE, version: '0.2.0' }, { version: '0.2.0' })
+  assert.equal(confirmed.restore.application, 'applied')
+  assert.equal(confirmed.restore.version, '0.2.0')
+  const restart = await run({ application: 'restart-required', changed: true, bundle: PACKAGE, version: '0.2.0' }, { version: '0.2.0' })
+  assert.equal(restart.restore.application, 'restart-required')
 })
 
 test('installing 0.4.0 again after a finished update still allows a check', async t => {
