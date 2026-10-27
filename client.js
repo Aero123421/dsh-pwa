@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'pwa.installed': 'The home-screen app is installed.', 'pwa.ios': 'In Safari, use Share → Add to Home Screen. Open this page in Safari rather than an in-app browser.',
       'pwa.manual': 'Use the browser menu → Install app / Add to Home Screen. The install button appears here when the browser offers it.',
       'pwa.accepted': 'Installation was accepted. Finish any browser confirmation.', 'pwa.dismissed': 'Installation was cancelled. You can try again from the browser menu.',
+      'pwa.prompt-failed': 'The browser could not open the installation prompt. Use the browser menu to install.',
       title: 'PWA & Mobile', updates: 'Plugin updates', version: 'Running plugin version', installed: 'Installed plugin version', check: 'Check for updates', install: 'Update plugin', reconcile: 'Check result', manual: 'Manual update on GitHub Releases',
       hint: 'If the home-screen icon stays outdated, remove it and add it again.',
       idle: 'Check for a versioned plugin release.', checking: 'Checking for updates…', current: 'No newer stable release.', 'no-release': 'No published update release yet.',
@@ -36,6 +37,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'pwa.installed': 'ホーム画面アプリを追加済みです。', 'pwa.ios': 'Safariの「共有」→「ホーム画面に追加」で追加できます。アプリ内ブラウザではなくSafariで開いてください。',
       'pwa.manual': 'ブラウザのメニューから「アプリをインストール」または「ホーム画面に追加」を選んでください。ブラウザが対応する場合は、ここにもインストールボタンが表示されます。',
       'pwa.accepted': 'インストール操作を受け付けました。ブラウザ側に確認が表示された場合は完了してください。', 'pwa.dismissed': 'インストールをキャンセルしました。ブラウザのメニューから再実行できます。',
+      'pwa.prompt-failed': 'ブラウザがインストール確認を開けませんでした。ブラウザのメニューからインストールしてください。',
       title: 'PWA・モバイル', updates: 'プラグインの更新', version: 'プラグインの実行版', installed: '導入済みの版', check: '更新を確認', install: 'プラグインを更新', reconcile: '結果を確認', manual: 'GitHub Releases から手動更新',
       hint: 'ホーム画面のアイコンが古い場合は、追加し直してください。',
       idle: '版付きのプラグイン配布を確認できます。', checking: '更新を確認しています…', current: '新しい正式版はありません。', 'no-release': '公開された更新版がありません。',
@@ -109,7 +111,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         await event.prompt() // Invoked in the button's user-activation task.
         const choice = await event.userChoice
         if (!this.state.installed) this.publish({ outcome: choice.outcome === 'accepted' ? 'accepted' : 'dismissed' })
-      } catch { this.publish({ outcome: 'failed' }) }
+      } catch { this.publish({ outcome: 'prompt-failed' }) }
     }
     async check() {
       if (this.closed || this.state.check === 'checking') return
@@ -162,7 +164,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
           h('h4', { className: 'dsh-pwa-title' }, t('pwa.title')),
           h('p', { className: 'dsh-pwa-state', role: status === 'failed' || status === 'insecure' ? 'alert' : 'status' }, t(`pwa.${status}`)))),
       !state.installed && h('p', { className: 'dsh-pwa-desc' }, t(state.ios ? 'pwa.ios' : 'pwa.manual')),
-      state.outcome && h('p', { className: 'dsh-pwa-state', role: 'status' }, t(`pwa.${state.outcome}`)),
+      state.outcome && h('p', { className: 'dsh-pwa-state', role: state.outcome === 'prompt-failed' ? 'alert' : 'status' }, t(`pwa.${state.outcome}`)),
       h('div', { className: 'dsh-pwa-actions' },
         state.prompt && !state.installed && state.secure && h(Button, { size: 'sm', variant: 'primary', onClick: () => { void install.install() } }, t('pwa.install')),
         h(Button, { size: 'sm', variant: 'outline', disabled: state.check === 'checking', onClick: () => { void install.check() } }, t('pwa.check'))))
@@ -231,7 +233,9 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
           this.requestId = undefined
           try { if (key && this.storage?.getItem(key) === requestId) this.storage.removeItem(key) } catch {}
         }
-        this.publish({ ...this.state, status: error.rejected ? 'failed' : 'unknown', reason: error.message.endsWith('/busy') ? 'busy' : 'network' })
+        const code = typeof error.message === 'string' && error.message.startsWith('dsh-pwa/') ? error.message.slice('dsh-pwa/'.length) : ''
+        const reason = code === 'busy' || code === 'stale-candidate' ? code : 'network'
+        this.publish({ ...this.state, status: error.rejected ? 'failed' : 'unknown', reason })
       }
     }
     dispose() { this.closed = true; this.generation++; clearTimeout(this.timer); this.listeners.clear() }
@@ -805,9 +809,14 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       if (main) routeWatch.observe(main, { childList: true })
       const history = window.history
       const pushState = history?.pushState, replaceState = history?.replaceState
-      if (pushState && replaceState) {
-        history.pushState = function (...args) { const result = pushState.apply(this, args); onRoute(); return result }
-        history.replaceState = function (...args) { const result = replaceState.apply(this, args); onRoute(); return result }
+      // Restore only this wrapper. A later owner keeps the methods, and a
+      // retained call stops closing the drawer after this effect ends.
+      let routeAlive = true
+      const wrappedPush = pushState && function (...args) { const result = pushState.apply(this, args); if (routeAlive) onRoute(); return result }
+      const wrappedReplace = replaceState && function (...args) { const result = replaceState.apply(this, args); if (routeAlive) onRoute(); return result }
+      if (wrappedPush && wrappedReplace) {
+        history.pushState = wrappedPush
+        history.replaceState = wrappedReplace
       }
       window.addEventListener('popstate', onRoute)
       window.addEventListener('hashchange', onRoute)
@@ -818,8 +827,9 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         clearTimeout(timer); clearTimeout(closingTimer); watch.disconnect(); offPanel?.(); bodyWatch.disconnect(); dialogWatch?.disconnect(); routeWatch.disconnect()
         document.removeEventListener('pointerdown', noteDrawerGesture, true); document.removeEventListener('focusin', noteDrawerFocus, true); document.removeEventListener('click', onClick, true); window.removeEventListener('keydown', onKey, true)
         window.removeEventListener('popstate', onRoute); window.removeEventListener('hashchange', onRoute)
-        if (pushState && history.pushState !== pushState) history.pushState = pushState
-        if (replaceState && history.replaceState !== replaceState) history.replaceState = replaceState
+        routeAlive = false
+        if (wrappedPush && history.pushState === wrappedPush) history.pushState = pushState
+        if (wrappedReplace && history.replaceState === wrappedReplace) history.replaceState = replaceState
         for (const [el, inert] of originalInert) el.inert = inert
       }
     }, [active, ctx, locale, mobile])

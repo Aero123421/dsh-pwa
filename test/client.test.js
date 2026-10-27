@@ -51,8 +51,20 @@ test('authoritative busy refusal clears rejected UUID and later status discovers
   } } }, saved)
   controller.profileKey = 'p'; controller.publish({ status: 'available', candidate: { id: '7' } })
   await controller.begin(); assert.equal(saved.getItem('dsh-pwa:update:p'), undefined)
+  assert.equal(controller.state.reason, 'busy')
   await controller.load(); assert.equal(controller.requestId, 'accepted')
   assert.equal(calls.at(-1), 'dsh-pwa/update-status'); controller.dispose()
+})
+
+test('a stale candidate is not described as a network failure', async () => {
+  const { UpdateController } = await clientExports()
+  const controller = new UpdateController({ rpc: { call: async () => ({ ok: false, error: { code: 'dsh-pwa/stale-candidate' } }) } }, storage())
+  controller.profileKey = 'p'; controller.publish({ status: 'available', candidate: { id: '7' }, runtimeVersion: '0.4.5' })
+  await controller.begin()
+  assert.equal(controller.state.status, 'failed')
+  assert.equal(controller.state.reason, 'stale-candidate')
+  assert.equal(controller.state.runtimeVersion, '0.4.5')
+  controller.dispose()
 })
 
 test('profile change does not read another profile\'s pending sessionStorage UUID', async () => {
