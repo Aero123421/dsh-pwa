@@ -11,6 +11,7 @@ on:
       - 'scripts/browser-check.mjs'
       - 'scripts/pwa-proxy-check.mjs'
       - 'scripts/touch-scroll-check.mjs'
+      - 'scripts/check-dsh-peer.mjs'
       - '.github/workflows/mobile-browser.yml'
 permissions:
   contents: read
@@ -20,14 +21,19 @@ concurrency:
 jobs:
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        dsh: ['0.2.1-alpha.2', 'latest', 'next', 'alpha']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts
-      - run: npm install --global @deepseek-ai/dsh@0.2.1-alpha.3 pnpm@11.28.5
+      - run: npm install --global @deepseek-ai/dsh@${{ matrix.dsh }} pnpm@11.28.5
+      - run: npm run check:dsh-peer -- ${{ matrix.dsh }}
       - run: npx playwright install --with-deps chromium
       - run: node scripts/pwa-proxy-check.mjs
       - run: npm pack --ignore-scripts
@@ -52,7 +58,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mobile-browser-screenshots
+          name: mobile-browser-screenshots-${{ matrix.dsh }}
           path: /tmp/pwa-browser-evidence/*.png
           if-no-files-found: ignore
           retention-days: 14

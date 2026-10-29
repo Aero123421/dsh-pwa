@@ -41,7 +41,7 @@ const server = createServer(async (req, res) => {
 })
 server.listen(0, '127.0.0.1'); await once(server, 'listening')
 const origin = `http://127.0.0.1:${server.address().port}`
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, ...(process.env.DSH_TEST_CHROMIUM ? { executablePath: process.env.DSH_TEST_CHROMIUM } : {}) })
 try {
   // Phone emulation exercises the same metadata in the mobile browser context.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
