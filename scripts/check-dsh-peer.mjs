@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import semver from 'semver'
 import { promisify } from 'node:util'
 import { checkCompatibility } from '../updates.js'
+import { parseNpmViewVersion } from './npm-view-version.mjs'
 
 const exec = promisify(execFile)
 const root = dirname(fileURLToPath(new URL('../package.json', import.meta.url)))
@@ -34,8 +35,9 @@ try {
     // Resolve the CLI channel, then use the exact same app-boot version. The two
     // packages' dist-tags can move independently during an upstream release.
     const resolved = await exec('npm', ['view', `@deepseek-ai/dsh@${target}`, 'version', '--json'], { cwd: directory, timeout: 120000 })
-    const expected = JSON.parse(resolved.stdout)
-    if (!semver.valid(expected)) throw new Error(`Invalid published DSH version for ${target}`)
+    let expected
+    try { expected = parseNpmViewVersion(resolved.stdout) }
+    catch { throw new Error(`Invalid published DSH version for ${target}`) }
     if (checked.has(expected)) continue
     checked.add(expected)
     // Separate roots preserve module identity when checking several app-boot versions.
