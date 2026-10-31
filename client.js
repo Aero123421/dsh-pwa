@@ -507,7 +507,11 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
     ${M} [data-conversation-tabs]{margin-top:2px;padding-left:10px;gap:28px}
     @media (min-width:560px) and (max-height:500px){
       ${M} ${HEADER}:has([data-conversation-tabs]){grid-template-columns:auto minmax(0,1fr) auto}
-      ${M} ${HEADER} [data-conversation-tabs]{grid-column:3;grid-row:1;align-self:end;margin:0 0 0 16px;padding-left:0}
+      /* Newer hosts wrap the tablist and More menu in a shared grid item. */
+      ${M} ${HEADER} [data-conversation-tabs],${M} ${HEADER} div:not([data-slot]):has(>[data-conversation-tabs]){grid-column:3;grid-row:1;align-self:end;margin:0 0 0 16px;padding-left:0;width:auto;flex-wrap:nowrap}
+      /* DSH budgets 120px per view plus 48px for More; avoid sizing to its initial single tab. */
+      ${M} ${HEADER} div:not([data-slot]):has(>[data-conversation-tabs]){min-width:288px}
+      ${M} ${HEADER} div:not([data-slot])>[data-conversation-tabs]{margin:0;padding-left:0}
     }
     ${M} [data-composer-seat]{min-width:0;padding-bottom:${SAFE_B}}
     ${M}[data-dsh-mobile-keyboard] [data-composer-seat]{padding-bottom:0}

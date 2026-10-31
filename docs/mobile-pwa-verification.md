@@ -1,5 +1,7 @@
 # Mobile UI / PWA修正の検証メモ
 
+最新チャネルの調査と今回の検証範囲は [2026-10-29 の互換性確認](dsh-compatibility-2026-10-29.md) を参照してください。以下は既存リリース時の検証記録です。
+
 ## 照合した公式DSH
 
 ソース参照: `deepseek-ai/deepseek-harness@571902028a75c64c1d767f4ae5fd099485f0ddf0`。

@@ -1,7 +1,8 @@
 // Real DSH + its frozen React/primitives module table. No product build or server is added.
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, realpath } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { spawn, spawnSync } from 'node:child_process'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
@@ -29,7 +30,8 @@ const modelUrl = `http://127.0.0.1:${stub.address().port}`
 const env = { ...process.env, DSH_HOME: world, DSH_TELEMETRY_MODE: 'DISABLED', DEEPSEEK_API_KEY: 'pwa-smoke-fixture-key', DEEPSEEK_BASE_URL: modelUrl, DEEPSEEK_SEARCH_BASE_URL: 'http://127.0.0.1:9' }
 const manifest = JSON.parse(await readFile('package.json', 'utf8'))
 const source = process.argv[2] ?? resolve(`dsh-pwa-${manifest.version}.tgz`)
-// Japanese UI comes from dsh-japanese 0.2.3 (84776d7). The test only selects ja; it does not define it.
+// Older hosts need dsh-japanese 0.2.3 (84776d7); newer hosts publish Japanese.
+// The test only selects ja and never defines or replaces its dictionaries.
 const japanese = process.argv[3] ?? process.env.DSH_JAPANESE_SOURCE ?? 'github:Aero123421/dsh-japanese#84776d736e1020b950135c95cf16b33ff1e2a092'
 const profile = 'pwa-update-smoke'
 function command(args) {
@@ -37,11 +39,23 @@ function command(args) {
   if (result.status !== 0) { void writeFile(join(world, 'command.log'), result.stdout + result.stderr); throw new Error(`DSH command failed; evidence ${world}`) }
 }
 command(['--profile', profile, '--from-default-profile', 'web', '--dump-config'])
-command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', japanese])
-command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', source])
 const profileFile = join(world, 'profiles', profile, 'package.json')
+let nativeJapanese = false
+try {
+  const executable = spawnSync('which', ['dsh'], { env, encoding: 'utf8' })
+  if (executable.status !== 0) throw new Error('Cannot locate dsh executable')
+  const localeFile = createRequire(await realpath(executable.stdout.trim())).resolve('@deepseek-ai/dsh-client-locale/locale/ja.json')
+  await readFile(localeFile, 'utf8')
+  nativeJapanese = true
+} catch (error) {
+  if (!['MODULE_NOT_FOUND', 'ERR_PACKAGE_PATH_NOT_EXPORTED', 'ENOENT'].includes(error.code)) throw error
+}
+if (!nativeJapanese) command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', japanese])
+command(['plugin', '--profile', profile, 'add', '-w', '--ignore-scripts', source])
 const settings = JSON.parse(await readFile(profileFile, 'utf8'))
-settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-japanese', 'dsh-pwa'])]
+// The manager owns the installed bundle identifiers (older Japanese uses
+// @local/dsh-japanese). Adding an unscoped alias leaves a nonexistent bundle.
+settings.dsh.profile.bundles = [...new Set([...settings.dsh.profile.bundles, 'dsh-pwa'])]
 await writeFile(profileFile, JSON.stringify(settings, null, 2))
 let browser
 try {
@@ -96,7 +110,7 @@ try {
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
         const ja = locale.getSnapshot().locales.find(language => language.id === 'ja')
-        if (!ja || ja.label !== '日本語') throw new Error('dsh-japanese did not register ja')
+        if (!ja || ja.label !== '日本語') throw new Error('Japanese language is unavailable')
         locale.setLocale('ja')
       })
       const onboarding = page.getByRole('button', { name: /^(Configure later|あとで設定)$/ })
@@ -128,15 +142,12 @@ try {
       ]
       for (const [localeId, heading, strong, link, updatesHeading] of noteLocales) {
         await page.evaluate(localeId => window.__pwaTestContext.locale.setLocale(localeId), localeId)
-        if (localeId === 'zh') {
-          assert.equal(await page.evaluate(() => document.documentElement.lang), 'zh-CN', 'the built-in zh language sets the document language to zh-CN')
-        }
-        const localized = await page.waitForFunction(expected => {
+        const localized = await page.waitForFunction(({ expected, localeId }) => {
           const text = document.querySelector('.dsh-pwa-updates')?.innerText ?? ''
           const japaneseHeading = text.includes('プラグインの更新')
-          const ready = text.includes(expected) && !text.includes('dsh.pwa') && (expected === 'プラグインの更新' || !japaneseHeading)
+          const ready = text.includes(expected) && !text.includes('dsh.pwa') && (expected === 'プラグインの更新' || !japaneseHeading) && window.__pwaTestContext.locale.getSnapshot().active === localeId && (localeId !== 'zh' || document.documentElement.lang === 'zh-CN')
           return ready ? text : false
-        }, updatesHeading).then(handle => handle.jsonValue())
+        }, { expected: updatesHeading, localeId }).then(handle => handle.jsonValue())
         assert.equal(localized.includes('dsh.pwa'), false, `${localeId} must not show message keys`)
         if (!zhCopy && localeId !== 'ja') assert.equal(localized.includes('プラグインの更新'), false, `${localeId} showed:\n${localized.slice(0, 400)}`)
         const rendered = await page.evaluate(localeId => {
@@ -182,7 +193,7 @@ try {
         if (plain !== '') throw new Error('unmarked Japanese notes were shown outside ja')
         host?.__pwaNotesRoot?.unmount(); host?.remove()
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('Japanese language is unavailable')
         locale.setLocale('ja')
       })
       const check = panel.getByRole('button', { name: '更新を確認', exact: true })
@@ -261,7 +272,7 @@ try {
       assert.equal(await page.locator('.dsh-pwa-menu').count(), 0)
       await page.evaluate(() => {
         const locale = window.__pwaTestContext.locale
-        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('dsh-japanese did not register ja')
+        if (!locale.getSnapshot().locales.some(language => language.id === 'ja')) throw new Error('Japanese language is unavailable')
         locale.setLocale('ja')
       })
       await openSettings()
@@ -320,8 +331,8 @@ try {
       // The header menu is behind the open drawer; the backdrop closes it.
       const scrim = page.getByRole('button', { name: 'サイドバーの背景を閉じる', exact: true })
       await scrim.click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).first().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: /^(新しいセッション|新規セッション)$/ }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: /^(新しいセッション|新規セッション)$/ }).first().click(); await menu.waitFor()
       assert.equal(await page.locator('.dsh-pwa-toolbar').count(), 0, 'conversation views use the header menu, not the fallback toolbar')
       assert.equal(await page.locator('[data-conversation-header-leading] .dsh-pwa-menu-inline').count(), 1)
       // A normal-priority plugin must coexist with our fallback header contribution.
@@ -344,7 +355,7 @@ try {
       await page.locator('.dsh-pwa-toolbar').waitFor()
       assert.equal(await page.evaluate(() => document.documentElement.hasAttribute('data-dsh-mobile-toolbar')), true, 'pages without a conversation header keep the toolbar')
       await drawer(); await page.getByRole('button', { name: 'プラグイン', exact: true }).click(); await menu.waitFor()
-      await drawer(); await page.getByRole('button', { name: '新しいセッション', exact: true }).last().click(); await menu.waitFor()
+      await drawer(); await page.getByRole('button', { name: /^(新しいセッション|新規セッション)$/ }).last().click(); await menu.waitFor()
       const id = await page.evaluate(async cwd => {
         const ctx = window.__pwaTestContext, workspace = await ctx.get('workspaces').create({ path: cwd })
         const id = await ctx.get('sessions').create({ workspaceId: workspace.workspaceId })
@@ -368,7 +379,7 @@ try {
         await drawer()
         await page.evaluate(sessionId => {
           const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
-          const button = [...row.querySelectorAll('button')].find(item => /の操作$/.test(item.getAttribute('aria-label') ?? ''))
+          const button = [...row.querySelectorAll('button')].find(item => /の\s*(?:セッション)?操作$/.test(item.getAttribute('aria-label') ?? ''))
           if (!button) throw new Error('session actions button missing')
           button.click()
         }, id)
@@ -410,7 +421,8 @@ try {
           if (!title) throw new Error('session title missing')
           title.tabIndex = 0
           title.focus()
-          title.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+          title.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1 }))
+          title.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }))
         }, id)
         await page.locator('[role=dialog][aria-modal="true"]').waitFor()
         await page.waitForFunction(() => {
@@ -588,7 +600,7 @@ try {
       await writeFile(join(world, `console-${restart}.json`), JSON.stringify(consoleMessages))
       assert.equal(new URL(page.url()).origin, origin)
       assert.ok((await page.title()).length > 0)
-      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via dsh-japanese 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, right Escape/focus and hidden-drawer collapse, ${restart === 0 ? 'rename dialog keeps the drawer, search reselection and workspace draft reuse close it, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
+      console.log(`DSH startup ${restart + 1}: version ${manifest.version}, authenticated routes, manifest/icons, Japanese UI via ${nativeJapanese ? 'DSH' : 'dsh-japanese'} 1280/600/390px, 767/768px boundary, persistent modes, header menu/toolbar fallback, drawers/reselection, right Escape/focus and hidden-drawer collapse, ${restart === 0 ? 'rename dialog keeps the drawer, search reselection and workspace draft reuse close it, wide table scroll, landscape 844x390 and 667x375 header clearance and tabs, ' : ''}reduced motion and desktop recovery passed; source ${source.startsWith('github:') ? 'GitHub commit' : 'local package'}; evidence ${world}`)
     } catch (error) { await writeFile(join(world, `startup-${restart}.log`), log); const page = context.pages()[0]; if (page) { await page.screenshot({ path: join(world, 'failure.png') }).catch(() => {}); await writeFile(join(world, 'failure-dom.txt'), await page.locator('body').innerText()).catch(() => {}) } console.error('Evidence '+world); throw error }
     finally { await context.close(); child.kill('SIGTERM'); await done }
   }
