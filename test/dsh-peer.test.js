@@ -3,6 +3,16 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import semver from 'semver'
 import { checkCompatibility, PACKAGE } from '../updates.js'
+import { parseNpmViewVersion } from '../scripts/npm-view-version.mjs'
+
+test('npm view version accepts scalar or singleton array and rejects ambiguous results', () => {
+  assert.equal(parseNpmViewVersion('"0.2.1-rc.5"'), '0.2.1-rc.5')
+  assert.equal(parseNpmViewVersion('["0.2.1-rc.5"]'), '0.2.1-rc.5')
+  for (const value of ['[]', '["0.2.1-rc.4","0.2.1-rc.5"]', '"latest"', '{}', 'null']) {
+    assert.throws(() => parseNpmViewVersion(value), /Invalid published DSH version/)
+  }
+  assert.throws(() => parseNpmViewVersion('not json'), SyntaxError)
+})
 
 const options = { includePrerelease: true }
 const accepted = ['0.2.1-alpha.2', '0.2.1-alpha.3', '0.2.1-alpha.10', '0.2.1-beta.1', '0.2.1', '0.2.2-alpha.1', '0.2.9']

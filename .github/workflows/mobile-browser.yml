@@ -12,6 +12,7 @@ on:
       - 'scripts/pwa-proxy-check.mjs'
       - 'scripts/touch-scroll-check.mjs'
       - 'scripts/check-dsh-peer.mjs'
+      - 'scripts/npm-view-version.mjs'
       - '.github/workflows/mobile-browser.yml'
 permissions:
   contents: read
