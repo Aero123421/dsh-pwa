@@ -15,6 +15,12 @@ function reasonOf(error) {
   return allowed.includes(error?.message) ? error.message : 'network'
 }
 
+/** blocked is a lasting property of this installation. A failed reachability check is not. */
+function reportedStatus(error) {
+  if (error?.message === 'release-unavailable') return 'no-release'
+  return reasonOf(error) === 'network' ? 'unreachable' : 'blocked'
+}
+
 export function semanticVersion(value) {
   if (typeof value !== 'string') throw new Error('metadata')
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/.exec(value)
@@ -179,16 +185,36 @@ function savedSelection(options, previous) {
   return {
     source: typeof previous?.source === 'string' ? previous.source : undefined,
     enabled: typeof previous?.enabled === 'boolean' ? previous.enabled : !!options?.enabled,
+    version: typeof previous?.version === 'string' ? previous.version : undefined,
   }
+}
+
+/** The installed row, false when this package is absent, or null when listBundles cannot be trusted. */
+async function installedPackage(manager) {
+  if (typeof manager?.listBundles !== 'function') return null
+  try {
+    const rows = await manager.listBundles()
+    return rows.find(row => row?.name === PACKAGE && row.installed) ?? false
+  } catch { return null }
 }
 
 /** True, false, or null when listBundles cannot be trusted. Null must not start a restore. */
 async function packageInstalled(manager) {
-  if (typeof manager?.listBundles !== 'function') return null
-  try {
-    const rows = await manager.listBundles()
-    return rows.some(row => row?.name === PACKAGE && row.installed)
-  } catch { return null }
+  const row = await installedPackage(manager)
+  if (row === null) return null
+  return row !== false
+}
+
+/** A restore counts only when the install result and the listed row both show the saved version, with no error. */
+function restoreConfirmed(restored, saved, row) {
+  if (!restored || restored.error || restored.application === 'failed') return false
+  if (restored.packageResult && (restored.packageResult.exitCode !== 0 || restored.packageResult.timedOut)) return false
+  if (restored.application !== 'applied' && restored.application !== 'restart-required') return false
+  if (!row || row.error || row.readOnlyReason) return false
+  if (saved?.version && row.version !== saved.version) return false
+  if (saved?.version && restored.version && restored.version !== saved.version) return false
+  if (restored.version && row.version && restored.version !== row.version) return false
+  return true
 }
 
 /**
@@ -210,6 +236,8 @@ function replacementFailed(result) {
  * That includes application failed, an error, and restart-required whose packageResult
  * exited non-zero or timed out. A listBundles failure counts as still present.
  * The restore install uses a new requestId. If the package is still absent, restore.application is failed.
+ * A listed row is restored only when restoreConfirmed accepts it. Anything else is unverified,
+ * including a failed install result, a different version, a row error, or a listBundles failure.
  */
 export async function restoreIfMissing(manager, installed, saved, persist) {
   if (!replacementFailed(installed)) return installed
@@ -220,11 +248,11 @@ export async function restoreIfMissing(manager, installed, saved, persist) {
   try {
     restored = await manager.installBundle(saved.source, { enabled: saved.enabled, requestId: randomUUID(), saveExact: true })
   } catch { restored = undefined }
-  if (await packageInstalled(manager) === true) {
-    const application = restored?.application === 'restart-required' ? 'restart-required' : 'applied'
-    return { ...installed, restore: { application, version: restored?.version } }
-  }
-  return { ...installed, restore: { application: 'failed' } }
+  const row = await installedPackage(manager)
+  if (row === false) return { ...installed, restore: { application: 'failed' } }
+  if (!restoreConfirmed(restored, saved, row)) return { ...installed, restore: { application: 'unverified' } }
+  const application = restored.application === 'restart-required' ? 'restart-required' : 'applied'
+  return { ...installed, restore: { application, version: row.version ?? restored.version } }
 }
 
 async function replaceOrRestore(manager, spec, options, saved, persist) {
@@ -318,7 +346,7 @@ export class PluginUpdates {
     const { dshVersion, bundle } = await this.capability()
     const requestId = this.running?.requestId ?? await this.lastOperation()
     return requestId ? { ...(await this.reconcile(requestId)), dshVersion } : { ...this.base(), dshVersion, installedVersion: bundle.version, status: viewStatus(bundle.version, this.version) }
-  } catch (error) { return { ...this.base(), status: 'blocked', reason: reasonOf(error) } } }
+  } catch (error) { return { ...this.base(), status: reportedStatus(error), reason: reasonOf(error) } } }
   async privateDir() {
     await mkdir(this.cacheDir, { recursive: true, mode: 0o700 })
     if (!(await lstat(this.cacheDir)).isDirectory() || (await lstat(this.cacheDir)).isSymbolicLink()) throw new Error('storage')
@@ -356,7 +384,7 @@ export class PluginUpdates {
       } catch (error) {
         this.candidate = null
         // Unmet ranges stay visible before any update so the needed DSH version is stated, not just the refusal.
-        return { ...this.base(), status: error.message === 'release-unavailable' ? 'no-release' : 'blocked', reason: reasonOf(error), ...(error.requirements ? { dshRequirements: error.requirements } : {}) }
+        return { ...this.base(), status: reportedStatus(error), reason: reasonOf(error), ...(error.requirements ? { dshRequirements: error.requirements } : {}) }
       }
     })().finally(() => { this.checking = null })
     return this.checking
@@ -408,7 +436,7 @@ export class PluginUpdates {
       if (compareVersions(candidate.version, final.bundle.version) <= 0) throw new Error('stale-candidate')
       managerInvoked = true
       const result = await installBundleUpdating(final.manager, spec, { enabled: final.bundle.enabled, requestId: operation.requestId, saveExact: true }, {
-        source: final.bundle.source, enabled: final.bundle.enabled,
+        source: final.bundle.source, enabled: final.bundle.enabled, version: final.bundle.version,
         persist: async failed => {
           operation.result = safeResult(failed)
           operation.status = failed?.application === 'cancelled' ? 'cancelled' : 'failed'
@@ -418,12 +446,14 @@ export class PluginUpdates {
       operation.result = safeResult(result)
       if (result?.restore?.application === 'failed') operation.reason = 'plugin-missing'
       else if (result?.restore?.application === 'applied' || result?.restore?.application === 'restart-required') operation.reason = 'restored'
+      else if (result?.restore?.application === 'unverified') operation.reason = 'restore-unverified'
       const installed = (await final.manager.listBundles()).find(bundle => bundle.name === PACKAGE)
       operation.status = resultState(result, operation.version, this.version, installed)
     } catch (error) {
-      if (operation.reason !== 'restored' && operation.reason !== 'plugin-missing') {
+      if (operation.reason !== 'restored' && operation.reason !== 'plugin-missing' && operation.reason !== 'restore-unverified') {
         operation.status = managerInvoked ? 'unknown' : 'failed'
-        operation.reason = reasonOf(error)
+        // Disposal aborts preparation before pnpm. That is an interrupt, not a release-service failure.
+        operation.reason = !managerInvoked && (this.closed || error?.name === 'AbortError' || error?.code === 'ABORT_ERR') ? 'interrupted' : reasonOf(error)
       } else if (operation.status === 'installing' || operation.status === 'preparing') operation.status = 'failed'
     }
     try { await this.save(operation) } catch { /* Manager retains its running operation; reconcile still checks it. */ }
@@ -444,7 +474,8 @@ export class PluginUpdates {
     }
     const bundle = (await this.manager()?.listBundles())?.find(item => item.name === PACKAGE)
     const installed = bundle?.version
-    const previouslyApplied = operation.status === 'applied'
+    const recorded = operation.status
+    const previouslyApplied = recorded === 'applied'
     if (operation.result) operation.status = resultState(operation.result, operation.version, this.version, bundle)
     if (['installing', 'restart-required', 'unknown', 'applied'].includes(operation.status) && this.version === operation.version) {
       operation.status = bundle?.installed && !bundle.error && !bundle.readOnlyReason && installed === operation.version ? 'applied' : 'unknown'
@@ -453,6 +484,14 @@ export class PluginUpdates {
     // must not stay unknown. The saved record stays applied so the next reconcile still recognizes it.
     // Clearing latest.json keeps an older build from replaying the id.
     if (previouslyApplied && installed && installed !== operation.version) {
+      operation.status = 'applied'
+      await this.clearLatest(requestId)
+      return { ...this.base(), installedVersion: installed, status: viewStatus(installed, this.version) }
+    }
+    // A saved restart-required install is finished. Once a different bundle is installed and this
+    // process is not that version, Check must not stay disabled. The process that is already that
+    // version still reports unknown when the bundle does not match. An in-flight record stays.
+    if (!this.running && recorded === 'restart-required' && installed && installed !== operation.version && this.version !== operation.version) {
       operation.status = 'applied'
       await this.clearLatest(requestId)
       return { ...this.base(), installedVersion: installed, status: viewStatus(installed, this.version) }

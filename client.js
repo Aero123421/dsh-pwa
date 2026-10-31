@@ -19,6 +19,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       available: 'A plugin update is available.', starting: 'Preparing the update…', preparing: 'Validating the release files…', installing: 'DSH is installing the plugin…',
       'restart-required': 'Installed. Restart DSH to apply the plugin update.', applied: 'Updated. Installed and running versions match.', unknown: 'The result is unknown. Check the original operation instead of submitting it again.',
       failed: 'Update failed.', cancelled: 'Update cancelled.', overridden: 'Another configuration overrides this update.', blocked: 'Automatic updates are unavailable for this installation.',
+      unreachable: 'Updates could not be checked. Try again later.',
       'reason.manager-unavailable': 'Automatic updates are unavailable in this environment. Update manually.', 'reason.read-only': 'These settings cannot change this installation.', 'reason.source': 'Update this installation manually.',
       'reason.metadata': 'Release files or metadata are missing or invalid.', 'reason.channel': 'Only stable releases are offered.', 'reason.incompatible': 'This release does not support the running DSH version.', 'reason.compatibility-unknown': 'DSH compatibility could not be confirmed.',
       'reason.busy': 'Another update is in progress.', 'reason.redirect': 'A download redirected outside the approved repository.', 'reason.size': 'Release data exceeded the download limit.', 'reason.stale-candidate': 'The candidate or installed bundle changed. Check again.',
@@ -28,6 +29,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.release-unavailable': 'No published update release is available.', 'reason.storage': 'The profile update record could not be saved.', 'reason.interrupted': 'Preparation was interrupted before installation. Check again.', 'reason.network': 'The release service or DSH connection could not be reached.',
       'reason.restored': 'The new version did not install. The previous version was installed again. Restart DSH if the plugin does not come back.',
       'reason.plugin-missing': 'The new version did not install, and the previous version could not be put back. The plugin may have been removed. Install it again from GitHub Releases.',
+      'reason.restore-unverified': 'The new version did not install. Whether the previous version is installed could not be confirmed. Check the plugin list before trying again.',
     },
     ja: {
       'pwa.title': 'ホーム画面に追加', 'pwa.install': 'アプリをインストール', 'pwa.check': 'PWAの設定を確認',
@@ -44,6 +46,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       available: 'プラグインの更新があります。', starting: '更新を準備しています…', preparing: '配布ファイルを検証しています…', installing: 'DSH がプラグインを導入しています…',
       'restart-required': '導入しました。更新を適用するには DSH を再起動してください。', applied: '更新しました。導入版と実行版の一致を確認しました。', unknown: '結果を確認できません。同じ導入は再送せず、元の操作の結果を確認してください。',
       failed: '更新に失敗しました。', cancelled: '更新をキャンセルしました。', overridden: '別の設定が優先され、更新を適用できませんでした。', blocked: 'この構成では自動更新できません。',
+      unreachable: '更新を確認できませんでした。あとでもう一度確認してください。',
       'reason.manager-unavailable': 'この環境では自動更新できません。手動で更新してください。', 'reason.read-only': 'この設定画面からは変更できません。', 'reason.source': 'この導入は手動で更新してください。',
       'reason.metadata': '配布ファイルが不足しているか、配布情報が不正です。', 'reason.channel': '正式版だけを更新候補にします。', 'reason.incompatible': 'この配布版は実行中の DSH に対応していません。', 'reason.compatibility-unknown': 'DSH との互換性を確認できません。',
       'reason.busy': '別の更新が進行中です。', 'reason.redirect': '許可していない取得先への転送を拒否しました。', 'reason.size': '配布情報が取得サイズ上限を超えました。', 'reason.stale-candidate': '候補または導入済み bundle が変わりました。再確認してください。',
@@ -53,6 +56,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       'reason.release-unavailable': '公開された更新版を取得できません。', 'reason.storage': 'profile の更新記録を保存できませんでした。', 'reason.interrupted': '導入前の準備が中断されました。再確認してください。', 'reason.network': '配布サービスまたは DSH と通信できませんでした。',
       'reason.restored': '新しい版は導入できませんでした。以前の版を入れ直しました。プラグインが戻らない場合は DSH を再起動してください。',
       'reason.plugin-missing': '新しい版は導入できず、以前の版も入れ直せませんでした。プラグインが消えている可能性があります。GitHub Releases から入れ直してください。',
+      'reason.restore-unverified': '新しい版は導入できませんでした。以前の版が入っているかは確認できませんでした。プラグイン一覧を確認してから、もう一度試してください。',
     },
   }
   /** Mirror server metadata on hot plugin activation. Restore only our writes. */
@@ -206,7 +210,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
         }
         this.publish(state)
         if (['preparing', 'installing'].includes(state.status)) this.timer = setTimeout(() => { void this.load() }, 800)
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'blocked', reason: 'network', dshRequirements: undefined }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: this.requestId ? 'unknown' : 'unreachable', reason: 'network', dshRequirements: undefined }) }
     }
     async check() {
       if (this.closed || ['checking', 'starting', 'preparing', 'installing', 'unknown', 'restart-required'].includes(this.state.status)) return
@@ -215,7 +219,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       try {
         const state = await this.call('check')
         if (generation === this.generation) { this.profileKey = state.profileKey; this.publish(state) }
-      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'blocked', reason: 'network', dshRequirements: undefined }) }
+      } catch { if (generation === this.generation) this.publish({ ...this.state, status: 'unreachable', reason: 'network', dshRequirements: undefined }) }
     }
     async begin() {
       if (this.closed || this.state.status !== 'available') return
@@ -954,7 +958,7 @@ window.__ModuleLoader__.load({ id: 'dsh-pwa', factory(require) {
       h('p', { className: 'dsh-pwa-desc' }, `${t('version')}: ${state.runtimeVersion ?? '—'}`),
       state.installedVersion && state.installedVersion !== state.runtimeVersion && h('p', { className: 'dsh-pwa-desc' }, `${t('installed')}: ${state.installedVersion}`),
       // Blocked is a lasting state of this installation (for example a local checkout), not a failure.
-      h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' ? 'alert' : 'status' }, t(state.status)),
+      h('p', { className: 'dsh-pwa-state', role: state.status === 'failed' || state.status === 'unreachable' ? 'alert' : 'status' }, t(state.status)),
       state.reason && h('p', { className: 'dsh-pwa-desc' }, t(`reason.${state.reason}`)),
       // Ranges stay untranslated like the version line: they name the DSH requirement the release states.
       state.dshRequirements && h('p', { className: 'dsh-pwa-desc' }, Object.entries(state.dshRequirements).map(([field, range]) => `${field} ${range}`).join(' · ')),

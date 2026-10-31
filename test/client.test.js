@@ -89,6 +89,11 @@ test('old responses after connection reset/disposal cannot mutate state or stora
   assert.match(copy.ja['reason.restored'], /以前の版を入れ直しました/)
   assert.match(copy.en['reason.plugin-missing'], /may have been removed/)
   assert.match(copy.ja['reason.plugin-missing'], /消えている可能性があります/)
+  assert.match(copy.en.unreachable, /Try again later/)
+  assert.match(copy.ja.unreachable, /あとでもう一度確認してください/)
+  assert.notEqual(copy.en.unreachable, copy.en.blocked)
+  assert.match(copy.en['reason.restore-unverified'], /could not be confirmed/)
+  assert.match(copy.ja['reason.restore-unverified'], /確認できませんでした/)
 })
 
 test('Client contribution stays optional without settings, locale or connection', async () => {
@@ -103,7 +108,7 @@ test('profile change clears old in-memory request before later connection failur
   const controller = new UpdateController({ rpc: { call: async () => { if (fail) throw new Error('network'); return { ok: true, value: { profileKey: 'B', status: 'idle' } } } } }, storage())
   controller.profileKey = 'A'; controller.requestId = 'old-A'; controller.publish({ status: 'unknown' })
   await controller.load(); assert.equal(controller.requestId, undefined)
-  fail = true; await controller.load(); assert.equal(controller.state.status, 'blocked'); controller.dispose()
+  fail = true; await controller.load(); assert.equal(controller.state.status, 'unreachable'); assert.equal(controller.state.reason, 'network'); controller.dispose()
 })
 
 test('network failures clear compatibility requirements from an older check', async () => {
@@ -118,6 +123,7 @@ test('network failures clear compatibility requirements from an older check', as
   assert.deepEqual(controller.state.dshRequirements, requirements)
   fail = true
   await controller.check()
+  assert.equal(controller.state.status, 'unreachable')
   assert.equal(controller.state.reason, 'network')
   assert.equal(controller.state.dshRequirements, undefined)
   controller.publish({ status: 'blocked', reason: 'incompatible', dshRequirements: requirements })
@@ -140,6 +146,23 @@ test('blocked update UI displays the exact unmet DSH requirement', async () => {
   const text = value => Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : value == null ? '' : String(value)
   assert.match(text(tree), /This release does not support the running DSH version\./)
   assert.match(text(tree), /engines\.dsh >=0\.2\.2 <0\.3\.0-0/)
+  assert.match(text(tree), /Automatic updates are unavailable for this installation\./)
+})
+
+test('an unreachable check is not described as an installation that cannot update', async () => {
+  const { UpdateUI, copy } = await clientExports()
+  const controller = {
+    subscribe: () => () => {},
+    getSnapshot: () => ({ runtimeVersion: '0.4.5', status: 'unreachable', reason: 'network' }),
+    check() {}, load() {},
+  }
+  const locale = { bind: () => key => copy.en[key] ?? key }
+  const tree = UpdateUI({ controller, locale })
+  const text = value => Array.isArray(value) ? value.map(text).join('') : value && typeof value === 'object' ? text(value.children) : value == null ? '' : String(value)
+  const rendered = text(tree)
+  assert.match(rendered, /Updates could not be checked\. Try again later\./)
+  assert.match(rendered, /The release service or DSH connection could not be reached\./)
+  assert.equal(rendered.includes('Automatic updates are unavailable for this installation.'), false)
 })
 
 function media(matches) {
