@@ -88,6 +88,10 @@ function hooks(menu) {
 }
 async function fixture(t, { active = true, leftOpen = false, rightOpen = false, initialInert = [false, false, false] } = {}) {
   const listeners = new Map(), observers = [], timers = queue(), raf = queue()
+  const location = { pathname: '/', search: '', hash: '' }
+  const originalPush = function pushState() { return 'push' }
+  const originalReplace = function replaceState() { return 'replace' }
+  const history = { pushState: originalPush, replaceState: originalReplace }
   const document = {
     addEventListener(type, fn, capture = false) { (listeners.get(type) ?? listeners.set(type, new Map()).get(type)).set(fn, capture) },
     removeEventListener(type, fn, capture = false) { assert.equal(listeners.get(type)?.get(fn), capture); listeners.get(type)?.delete(fn) },
@@ -120,8 +124,8 @@ async function fixture(t, { active = true, leftOpen = false, rightOpen = false, 
   const runtime = hooks(menu)
   let exported
   runInNewContext(await readFile(new URL('../client.js', import.meta.url), 'utf8'), {
-    location: { pathname: '/', search: '', hash: '' }, HTMLElement: Element, CSS: { escape: value => value },
-    window: { addEventListener: document.addEventListener, removeEventListener: document.removeEventListener, __ModuleLoader__: { load: entry => { exported = entry.factory(name => name === 'react' ? runtime.React : {}) } } },
+    location, HTMLElement: Element, CSS: { escape: value => value },
+    window: { history, addEventListener: document.addEventListener, removeEventListener: document.removeEventListener, __ModuleLoader__: { load: entry => { exported = entry.factory(name => name === 'react' ? runtime.React : {}) } } },
     document, getComputedStyle: node => ({ visibility: node.visibility }),
     MutationObserver: class {
       constructor(callback) { this.callback = callback; this.targets = []; this.connected = true; observers.push(this) }
@@ -141,7 +145,7 @@ async function fixture(t, { active = true, leftOpen = false, rightOpen = false, 
   }
   return { body, frame, sidebar, sidebarSlot, first, last, center, opener, input, right, panel, rightFirst, rightLast, float, menu,
     el, mobile, layout, panelInfo, selection, observers, listeners, timers, raf, render, notify, unmount, fire,
-    get toggles() { return toggles }, get panelCloses() { return panelCloses } }
+    get toggles() { return toggles }, get panelCloses() { return panelCloses }, history, location, originalPush, originalReplace }
 }
 
 
@@ -229,6 +233,35 @@ test('right-panel mutations do not toggle twice before the hidden drawer collaps
   f.notify(); f.notify(); assert.equal(requested, 1)
   f.frame.setAttribute('data-sidebar-collapsed', ''); f.notify()
   f.frame.removeAttribute('data-sidebar-collapsed'); f.notify(); assert.equal(requested, 2)
+})
+
+test('pushState closes the open drawer', async t => {
+  const f = await fixture(t, { leftOpen: true }); f.render()
+  assert.notEqual(f.history.pushState, f.originalPush)
+  f.location.pathname = '/plugins'
+  f.history.pushState({}, '', '/plugins')
+  assert.equal(f.toggles, 1)
+})
+
+test('cleanup keeps a later history wrapper and ignores a retained call', async t => {
+  const f = await fixture(t, { leftOpen: true }); f.render()
+  const wrapped = f.history.pushState
+  const later = function laterPush(...args) { return wrapped.apply(this, args) }
+  f.history.pushState = later
+  f.unmount()
+  assert.equal(f.history.pushState, later)
+  assert.equal(f.history.replaceState, f.originalReplace)
+  f.location.pathname = '/settings'
+  later({}, '', '/settings')
+  wrapped({}, '', '/settings')
+  assert.equal(f.toggles, 0)
+})
+
+test('cleanup restores history when this wrapper is still current', async t => {
+  const f = await fixture(t); f.render()
+  f.unmount()
+  assert.equal(f.history.pushState, f.originalPush)
+  assert.equal(f.history.replaceState, f.originalReplace)
 })
 
 test('unmount right after a drawer dialog closes cancels the pending focus return', async t => {
